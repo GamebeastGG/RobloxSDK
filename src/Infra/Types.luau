@@ -16,6 +16,11 @@ export type JSON = any
 } | { number | string | boolean | JSON }
  ]]
 
+--// Service subtypes
+export type HeatmapWaypointAppearanceInfo = {
+    color : Color3,
+    shape : "Square" | "Circle"
+}
 
 --// Public API Types
 
@@ -37,7 +42,11 @@ export type EventsService = {
 	OnEnd : (self : EventsService, event : string, callback : (data : JSON) -> ()) -> RBXScriptConnection,
 }
 
+export type HeatmapsService = {
+	RegisterHeatmap : (self : HeatmapsService, heatmapName : string, positionA : Vector3, positionB : Vector3) -> (),
+	AddHeatmapWaypoint : (self : HeatmapsService, heatmapName : string, waypointName : string, position : Vector3, appearanceInfo : HeatmapWaypointAppearanceInfo) -> (),
+}
 
-export type Service = ConfigsService | MarkersService | EventsService
+export type Service = ConfigsService | MarkersService | EventsService | HeatmapsService
 
 return true

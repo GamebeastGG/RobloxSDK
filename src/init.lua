@@ -151,6 +151,7 @@ local function StartSDK()
 	AddModuleFolder(script.Infra.Shared)
 
 	AddModule(script.Infra:WaitForChild("MetaData"))
+	AddModule(script.Infra:WaitForChild("Types"))
 
 	-- Set settings
 

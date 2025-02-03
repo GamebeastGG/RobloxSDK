@@ -2,21 +2,22 @@
     The Gamebeast SDK is Copyright © 2023 Gamebeast, Inc. to present.
     All rights reserved.
 
-    Heatmap.luau
+    InternalHeatmaps.luau
     
     Description:
-        Heatmap API for Gamebeast SDK.
+        InternalHeatmaps API for Gamebeast SDK.
     
 --]]
 
 --= Root =--
-local Heatmap = { }
+local InternalHeatmaps = { }
 
 --= Roblox Services =--
 
 --= Dependencies =--
 
 local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
+local Types = shared.GBMod("Types") ---@module Types
 
 --= Types =--
 
@@ -46,7 +47,7 @@ end
 
 --= API Functions =--
 
-function Heatmap:RegisterHeatmap(name : string, positionA : Vector3, positionB : Vector3)
+function InternalHeatmaps:RegisterHeatmap(name : string, positionA : Vector3, positionB : Vector3)
     GBRequests:GBRequestAsync("sdk/heatmap", {
         ["name"] = name,
         ["positionA"] = RoundVector3(positionA),
@@ -54,7 +55,7 @@ function Heatmap:RegisterHeatmap(name : string, positionA : Vector3, positionB :
     })
 end
 
-function Heatmap:AddHeatmapWaypoint(heatmapName : string, waypointName : string, position : Vector3, appearanceInfo : { color : Color3, shape : "Square" | "Circle"})
+function InternalHeatmaps:AddHeatmapWaypoint(heatmapName : string, waypointName : string, position : Vector3, appearanceInfo : Types.HeatmapWaypointAppearanceInfo)
     appearanceInfo = DEFAULT_APPEARANCE_INFO or appearanceInfo
     
     -- Set defaults if not set.
@@ -76,4 +77,4 @@ function Heatmap:AddHeatmapWaypoint(heatmapName : string, waypointName : string,
 end
 
 --= Return Module =--
-return Heatmap
+return InternalHeatmaps
