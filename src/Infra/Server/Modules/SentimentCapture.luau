@@ -57,22 +57,10 @@ function SentimentCapture:Init()
 				Chat:FilterStringForBroadcast(message, player)
 			end) or message
 	
-			local heatmapMetadata = InternalConfigs.GBConfigs.HeatmapMetadata
-	
-			--NOTE: Likely to scrap position localization with new heatmap API
-			if heatmapMetadata.center then
-				if player.Character and player.Character.PrimaryPart then
-					position = player.Character.PrimaryPart.Position
-				end
-	
-				local center, size = heatmapMetadata.center, heatmapMetadata.size
-				center = CFrame.new(center[1], center[2], center[3])
-				size = Vector3.new(size[1], size[2], size[3])
-	
-				position = center:Inverse() * CFrame.new(position)
-				position = {-position.X / size.X, position.Y / size.Y, -position.Z / size.Z}
+			if player.Character and player.Character.PrimaryPart then
+				position = player.Character.PrimaryPart.Position
 			end
-	
+
 			-- Send marker with relevant args
 			local args = {
 				["message"] = message

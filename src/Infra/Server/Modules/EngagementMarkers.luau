@@ -28,6 +28,7 @@ local PlayerStats = shared.GBMod("PlayerStats") ---@module PlayerStats
 local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
 local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
+local SocialHandler = shared.GBMod("SocialHandler") ---@module SocialHandler
 
 
 --= Types =--
@@ -257,10 +258,12 @@ function EngagementMarkers:Init()
 		LastCharPositions[player] = nil
 		
 		-- Compute session length in addition to backend for reasons(?)
+		local sessionLength = Utilities.roundNum(tick() - PlayerStats:GetStat(player, "session_length"), 0.1)
 		local args = {
-			["sessionLength"] = Utilities.roundNum(tick() - PlayerStats:GetStat(player, "session_length"), 0.1)
+			["sessionLength"] = sessionLength,
+			["friendPlayPercent"] = Utilities.roundNum(SocialHandler:GetTotalFriendPlaytime(player)/sessionLength, 0.01)
 		}
-		
+
 		-- Send Logout marker with relevant info
 		self:SDKMarker("Logout", args, {player = player, position = position})
 		
