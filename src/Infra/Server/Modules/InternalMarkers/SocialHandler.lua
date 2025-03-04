@@ -72,13 +72,13 @@ function SocialHandler:GetTotalFriendPlaytime(player : Player) : number
         return 0
     end
 
+    FriendsInServerCache[player] = nil
+
     if #cachedData.Friends  > 0 then
         return cachedData.TotalTime + (tick() - cachedData.Timestamp)
     else
         return cachedData.TotalTime
     end
-
-    FriendsInServerCache[player] = nil
 end
 
 --= Initializers =--
