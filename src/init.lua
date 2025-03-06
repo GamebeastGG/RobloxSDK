@@ -116,7 +116,9 @@ local function AddModuleFolder(modulesFolder : Instance)
 	end
 
 	modulesFolder.Modules.DescendantAdded:Connect(moduleAddedLate)
-	modulesFolder.Public.DescendantAdded:Connect(moduleAddedLate, true)
+	modulesFolder.Public.DescendantAdded:Connect(function(module : ModuleScript)
+		moduleAddedLate(module, true)
+	end)
 end
 
 local function FindModule(moduleCache : {[string] : ModuleData | PublicModuleData}, name : string, timeout : number?)
