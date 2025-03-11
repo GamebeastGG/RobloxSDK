@@ -74,7 +74,7 @@ function SocialHandler:GetTotalFriendPlaytime(player : Player) : number
 
     FriendsInServerCache[player] = nil
 
-    if #cachedData.Friends  > 0 then
+    if #cachedData.Friends > 0 then
         return cachedData.TotalTime + (tick() - cachedData.Timestamp)
     else
         return cachedData.TotalTime
@@ -93,8 +93,8 @@ function SocialHandler:Init()
             }, { player = player })
         end
 
-
-        -- Look for friends
+        --NOTE: Disabled since large servers with lots of players joining will result in too many HTTP requests.
+        --[[ Look for friends
         for _, potentialFriend in ipairs(Players:GetPlayers()) do
             if potentialFriend ~= player and (player:IsFriendsWith(potentialFriend.UserId) or player.UserId < 0) then
                 FriendStatusUpdated(player, potentialFriend, true)
@@ -114,7 +114,7 @@ function SocialHandler:Init()
                 friendUserId = cachedData.Friends[1].UserId,
                 friendsInServer = #cachedData.Friends,
             }, { player = player })
-        end
+        end]]
     end
 
     Players.PlayerAdded:Connect(playerAdded)
