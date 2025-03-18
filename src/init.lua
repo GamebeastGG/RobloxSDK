@@ -10,6 +10,7 @@
 --]]
 
 --= Root =--
+
 local Gamebeast = { }
 
 --= Roblox Services =--
@@ -230,7 +231,6 @@ function Gamebeast:Setup(setupConfig : ServerSetupConfig?)
 	dataCacheModule:Set("Key", setupConfig.key)
 	dataCacheModule:Set("Settings", sdkSettings)
 end
-
 
 --= Initializers =--
 do
