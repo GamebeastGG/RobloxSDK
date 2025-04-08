@@ -61,18 +61,18 @@ local LastEventReportTime = 0
 local ClientInfoWarned = false
 
 --[[
-	When set, this is included in each marker's properties.
+	When set, this is included in each marker's `partitionId` property.
 
 	Set through `EngagementMarkers:SetServerExperimentPartitionId()` based on the
-	partition ID currently assigned to the server in an experiment, if any.
+	partition ID currently assigned to the server in an A/B testing campaign, if any.
 ]]
 local GameserverExperimentPartitionId = nil :: number?
 
 --[[
-	When set, these are included in each player's marker properties.
+	When set, these are included in the `partitionId` property of the player's markers.
 
 	Set through `EngagementMarkers:SetPlayerExperimentPartitionId()` based on the
-	partition ID currently assigned to the player in an experiment, if any.
+	partition ID currently assigned to the player in an A/B testing campaign, if any.
 ]]
 local ExperimentPartitionIdByPlayer = {} :: {[Player]: number}
 
@@ -242,14 +242,16 @@ function EngagementMarkers:ClearSessionId(player : Player)
 end
 
 --[[
-	Sets the assigned experiment partition ID to be included in each of the player's marker properties.
+	Sets the assigned A/B testing campaign partition ID to be included in the `partitionId`
+	property of the player's markers.
 ]]
 function EngagementMarkers:SetPlayerExperimentPartitionId(player: Player, partitionId: number?)
 	ExperimentPartitionIdByPlayer[player] = partitionId
 end
 
 --[[
-	Sets the assigned experiment partition ID to be included in each of the server's marker properties.
+	Sets the assigned A/B testing campaign partition ID to be included in the `partitionId`
+	property of the server's markers.
 ]]
 function EngagementMarkers:SetServerExperimentPartitionId(partitionId: number?)
 	GameserverExperimentPartitionId = partitionId

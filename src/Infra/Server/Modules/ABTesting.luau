@@ -1,5 +1,5 @@
 ----!strict
-local Experiments = {}
+local ABTesting = {}
 
 -- Services
 local Players = game:GetService("Players")
@@ -83,17 +83,17 @@ local knownPartitions = {} :: {[number]: AvailableCampaignPartitionSnapshot}
 ]]
 local assignmentWakeUpTimersByFuturePartitionId = {} :: {[number]: thread}
 
-Experiments.assignedServerPartitionId = nil :: number?
-Experiments.assignedPartitionIdByPlayer = {} :: {[Player]: number}
-Experiments.onServerPartitionIdChanged = Signal.new()
-Experiments.onPlayerPartitionIdChanged = Signal.new()
+ABTesting.assignedServerPartitionId = nil :: number?
+ABTesting.assignedPartitionIdByPlayer = {} :: {[Player]: number}
+ABTesting.onServerPartitionIdChanged = Signal.new()
+ABTesting.onPlayerPartitionIdChanged = Signal.new()
 
-Experiments.assignedServerConfig = nil :: ConfigSnapshot?
-Experiments.assignedConfigByPlayer = {} :: {[Player]: ConfigSnapshot}
-Experiments.onAssignedServerConfigChanged = Signal.new()
-Experiments.onAssignedPlayerConfigChanged = Signal.new()
+ABTesting.assignedServerConfig = nil :: ConfigSnapshot?
+ABTesting.assignedConfigByPlayer = {} :: {[Player]: ConfigSnapshot}
+ABTesting.onAssignedServerConfigChanged = Signal.new()
+ABTesting.onAssignedPlayerConfigChanged = Signal.new()
 
-Experiments.canonicalServerConfig = nil :: ConfigSnapshot?
+ABTesting.canonicalServerConfig = nil :: ConfigSnapshot?
 
 --[[
 	Updates whether assignments are being requested or not, based on the given
@@ -102,12 +102,12 @@ Experiments.canonicalServerConfig = nil :: ConfigSnapshot?
 	If assignment is triggered on, this will yield as it requests and waits for
 	the initial assignments to be received from the backend.
 ]]
-function Experiments:updateStateFromAvailableCampaigns(
+function ABTesting:updateStateFromAvailableCampaigns(
 	availableCampaignsSnapshot: AvailableCampaignsSnapshot,
 	canonicalServerConfig: ConfigSnapshot?
 )
 	if canonicalServerConfig then
-		Experiments.canonicalServerConfig = canonicalServerConfig
+		ABTesting.canonicalServerConfig = canonicalServerConfig
 	end
 
 	-- Ignore older snapshots (e.g. from config change jobs, which take longer to propagate to gameservers)
@@ -133,8 +133,8 @@ function Experiments:updateStateFromAvailableCampaigns(
 	-- Clear local assignments for campaigns that have been terminated
 	if currentAssignmentState then
 		local terminatedPartitionIds: {number} = {}
-		if Experiments.assignedServerPartitionId and not snapshotPartitionIdSet[Experiments.assignedServerPartitionId] then
-			table.insert(terminatedPartitionIds, Experiments.assignedServerPartitionId)
+		if ABTesting.assignedServerPartitionId and not snapshotPartitionIdSet[ABTesting.assignedServerPartitionId] then
+			table.insert(terminatedPartitionIds, ABTesting.assignedServerPartitionId)
 		end
 		for partitionId in currentAssignmentState.activePartitionStateById do
 			if not snapshotPartitionIdSet[partitionId] then
@@ -199,7 +199,7 @@ end
 	Processes a request from the backend to trigger requesting assignments for
 	specific players and servers.
 ]]
-function Experiments:processCampaignReassignmentRequest(request: CampaignReassignmentPropagationRequest)
+function ABTesting:processCampaignReassignmentRequest(request: CampaignReassignmentPropagationRequest)
 	local currentGameserverId = if game.JobId == ""
 		then "00000000-0000-0000-0000-000000000000"
 		else game.JobId
@@ -221,7 +221,7 @@ function Experiments:processCampaignReassignmentRequest(request: CampaignReassig
 end
 
 --[[
-	Starts requesting experiment assignments for players and the server.
+	Starts requesting campaign assignments for players and the server.
 
 	Called when the game receives GB configs and becomes aware of available
 	campaigns to enroll in.
@@ -235,7 +235,7 @@ function startRequestingAssignment()
 	currentAssignmentState = {
 		playerIdsPendingAssignment = {},
 		playerJoinListener = Players.PlayerAdded:Connect(function (player)
-			if not Experiments.assignedServerPartitionId then
+			if not ABTesting.assignedServerPartitionId then
 				queueAssignment({ player })
 			end
 		end),
@@ -249,7 +249,7 @@ function startRequestingAssignment()
 		unfetchedActivePartitionIdSet = {},
 	}
 
-	Utilities.GBLog("Started requesting experiment assignment")
+	Utilities.GBLog("Started requesting campaign assignment")
 	
 	-- Request initial assignment
 	Utilities.GBLog("Requesting initial assignment...")
@@ -258,7 +258,7 @@ function startRequestingAssignment()
 end
 
 --[[
-	Stops requesting experiment assignments for players and the server.
+	Stops requesting campaign assignments for players and the server.
 
 	Called when the game receives an updated available campaigns snapshot
 	and becomes aware that there are no longer any available campaigns.
@@ -270,7 +270,7 @@ function stopRequestingAssignment()
 
 	-- Clear current assignments
 	setAssignedServerPartitionId(nil)
-	for player in Experiments.assignedPartitionIdByPlayer do
+	for player in ABTesting.assignedPartitionIdByPlayer do
 		setAssignedPlayerPartitionId(player, nil)
 	end
 
@@ -283,11 +283,11 @@ function stopRequestingAssignment()
 
 	currentAssignmentState = nil
 
-	Utilities.GBLog("Stopped requesting experiment assignment")
+	Utilities.GBLog("Stopped requesting campaign assignment")
 end
 
 --[[
-	Queues players to be assigned to an experiment in bulk.
+	Queues players to be assigned to campaigns in bulk.
 ]]
 function queueAssignment(players: {Player})
 	assert(currentAssignmentState, "Assignment has not been started")
@@ -344,7 +344,7 @@ function executeAssignmentRequest()
 	-- Requeue requested players if assignment request failed
 	Utilities.GBLog("Received assignment response:", didSucceed, response)
 	if not didSucceed then
-		Utilities.GBWarn("Failed to get experiment assignment:", response)
+		Utilities.GBWarn("Failed to get campaign assignment:", response)
 
 		local players: {Player} = {}
 		for _, playerId in playerIds do
@@ -376,7 +376,7 @@ function executeAssignmentRequest()
 		setAssignedServerPartitionId(response.gameserverPartitionId)
 
 		-- Clear previous per-player assignments, if any
-		for player in Experiments.assignedPartitionIdByPlayer do
+		for player in ABTesting.assignedPartitionIdByPlayer do
 			setAssignedPlayerPartitionId(player, nil)
 		end
 
@@ -399,7 +399,7 @@ end
 function setAssignedPlayerPartitionId(player: Player, partitionId: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
 
-	local previousPartitionId = Experiments.assignedPartitionIdByPlayer[player]
+	local previousPartitionId = ABTesting.assignedPartitionIdByPlayer[player]
 	if previousPartitionId == partitionId then
 		return
 	end
@@ -418,13 +418,13 @@ function setAssignedPlayerPartitionId(player: Player, partitionId: number?)
 		end
 	end
 
-	Experiments.assignedPartitionIdByPlayer[player] = partitionId
-	Experiments.onPlayerPartitionIdChanged:Fire(player, partitionId)
+	ABTesting.assignedPartitionIdByPlayer[player] = partitionId
+	ABTesting.onPlayerPartitionIdChanged:Fire(player, partitionId)
 
 	if partitionId then
 		local partition = knownPartitions[partitionId]
-		Experiments.assignedConfigByPlayer[player] = partition.configs
-		Experiments.onAssignedPlayerConfigChanged:Fire(player, partition.configs)
+		ABTesting.assignedConfigByPlayer[player] = partition.configs
+		ABTesting.onAssignedPlayerConfigChanged:Fire(player, partition.configs)
 
 		if currentAssignmentState.activePartitionStateById[partitionId] then
 			currentAssignmentState.activePartitionStateById[partitionId].playerSet[player] = true
@@ -450,15 +450,15 @@ function setAssignedPlayerPartitionId(player: Player, partitionId: number?)
 
 	-- If unassigning from a partition, clear the assigned config
 	else
-		Experiments.assignedConfigByPlayer[player] = nil
-		Experiments.onAssignedPlayerConfigChanged:Fire(player, nil)
+		ABTesting.assignedConfigByPlayer[player] = nil
+		ABTesting.onAssignedPlayerConfigChanged:Fire(player, nil)
 	end
 end
 
 function setAssignedServerPartitionId(partitionId: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
 
-	local previousPartitionId = Experiments.assignedServerPartitionId
+	local previousPartitionId = ABTesting.assignedServerPartitionId
 	if previousPartitionId == partitionId then
 		return
 	end
@@ -472,13 +472,13 @@ function setAssignedServerPartitionId(partitionId: number?)
 		currentAssignmentState.activePartitionStateById[previousPartitionId] = nil
 	end
 
-	Experiments.assignedServerPartitionId = partitionId
-	Experiments.onServerPartitionIdChanged:Fire(partitionId)
+	ABTesting.assignedServerPartitionId = partitionId
+	ABTesting.onServerPartitionIdChanged:Fire(partitionId)
 
 	if partitionId then
 		local partition = knownPartitions[partitionId]
-		Experiments.assignedServerConfig = partition.configs
-		Experiments.onAssignedServerConfigChanged:Fire(partition.configs)
+		ABTesting.assignedServerConfig = partition.configs
+		ABTesting.onAssignedServerConfigChanged:Fire(partition.configs)
 
 		currentAssignmentState.activePartitionStateById[partitionId] = {
 			playerSet = {},
@@ -495,8 +495,8 @@ function setAssignedServerPartitionId(partitionId: number?)
 		end
 
 	else
-		Experiments.assignedServerConfig = nil
-		Experiments.onAssignedServerConfigChanged:Fire(nil)
+		ABTesting.assignedServerConfig = nil
+		ABTesting.onAssignedServerConfigChanged:Fire(nil)
 	end
 end
 
@@ -516,7 +516,7 @@ function clearTerminatedPartitionAssignments(terminatedPartitionIds: {number})
 			end
 		end
 
-		if Experiments.assignedServerPartitionId == partitionId then
+		if ABTesting.assignedServerPartitionId == partitionId then
 			Utilities.GBLog("Queuing reassignment for server from terminated partition:", partitionId)
 			didUnassignServer = true
 		end
@@ -547,4 +547,4 @@ function clearTerminatedPartitionAssignments(terminatedPartitionIds: {number})
 	end
 end
 
-return Experiments
+return ABTesting

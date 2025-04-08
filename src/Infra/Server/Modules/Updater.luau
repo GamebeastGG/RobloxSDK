@@ -24,7 +24,7 @@ local RunService = game:GetService("RunService")
 
 local GBRequests = shared.GBMod("GBRequests")
 local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module EngagementMarkers
-local Experiments = shared.GBMod("Experiments") ---@module Experiments
+local ABTesting = shared.GBMod("ABTesting") ---@module ABTesting
 local Utilities = shared.GBMod("Utilities")
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
 local Signal = shared.GBMod("Signal")
@@ -38,7 +38,7 @@ local BACKUP_STORE_KEY = (RunService:IsStudio() and "Studio" or "") .. "GBConfig
 
 --[[
 	When config is being applied, this controls the maximum amount of seconds
-	to wait for initial experiment assignment to complete before giving up
+	to wait for initial A/B testing assignment to complete before giving up
 	and using the canonical config.
 
 	If it takes longer, it will continue waiting for assignment to complete in the
@@ -92,13 +92,13 @@ function Updater:UpdateConfigs(newConfigs, init)
 	-- ABTesting is integral to the configs, but it cant be a leaf.
 	-- Maybe we have it listen and then fire 
 
-	-- Trigger experiment assignment, if applicable
+	-- Trigger A/B testing campaign assignment, if applicable
 	-- (this may yield, so it's limited by a timer to avoid blocking config readiness for too long)
 	do
 		local thread = coroutine.running()
 		local didResume = false
 		task.spawn(function ()
-			Experiments:updateStateFromAvailableCampaigns(newConfigs["GBConfigs"].ABTestingCampaigns, {
+			ABTesting:updateStateFromAvailableCampaigns(newConfigs["GBConfigs"].ABTestingCampaigns, {
 				variables = newConfigs.configs,
 				options = newConfigs.options,
 			})
@@ -110,7 +110,7 @@ function Updater:UpdateConfigs(newConfigs, init)
 		task.delay(MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME, function()
 			if not didResume then
 				didResume = true
-				Utilities.GBWarn("Initial experiment assignment taking unusually long, temporarily falling back to canonical config")
+				Utilities.GBWarn("Initial campaign assignment taking unusually long, temporarily falling back to canonical config")
 				coroutine.resume(thread)
 			end
 		end)
@@ -119,17 +119,17 @@ function Updater:UpdateConfigs(newConfigs, init)
 		end
 	end
 
-	-- If players are assigned to an experiment, use that config for them
-	for player, playerConfigs in Experiments.assignedConfigByPlayer do
+	-- If players are assigned to an A/B testing campaign, use that config for them
+	for player, playerConfigs in ABTesting.assignedConfigByPlayer do
 		InternalConfigs:ApplyConfigs(player, playerConfigs.variables, playerConfigs.options.privacy, init)
 	end
 
-	-- If server is assigned to an experiment, use that config, otherwise use canonical config
-	if Experiments.assignedServerConfig then
+	-- If server is assigned to an A/B testing campaign, use that config, otherwise use canonical config
+	if ABTesting.assignedServerConfig then
 		InternalConfigs:ApplyConfigs(
 			nil,
-			Experiments.assignedServerConfig.variables,
-			Experiments.assignedServerConfig.options.privacy,
+			ABTesting.assignedServerConfig.variables,
+			ABTesting.assignedServerConfig.options.privacy,
 			init
 		)
 	else
@@ -211,34 +211,34 @@ function Updater:Init()
 		end
 	end
 
-	-- Update marker properties when experiments are running
-	Experiments.onServerPartitionIdChanged:Connect(function (partitionId)
+	-- Update marker properties when A/B testing campaigns are running
+	ABTesting.onServerPartitionIdChanged:Connect(function (partitionId)
 		EngagementMarkers:SetServerExperimentPartitionId(partitionId)
 	end)
-	Experiments.onPlayerPartitionIdChanged:Connect(function (player, partitionId)
+	ABTesting.onPlayerPartitionIdChanged:Connect(function (player, partitionId)
 		EngagementMarkers:SetPlayerExperimentPartitionId(player, partitionId)
 	end)
 
 	-- Update configs for server with initialization flag
 	self:UpdateConfigs(newConfigs, true)
 
-	-- When the server's assigned experiment config changes, update the internal configs
-	Experiments.onAssignedServerConfigChanged:Connect(function (newAssignedConfigs)
+	-- When the server's assigned A/B testing campaign config changes, update the internal configs
+	ABTesting.onAssignedServerConfigChanged:Connect(function (newAssignedConfigs)
 		if InternalConfigs:IsReady() then
 			if newAssignedConfigs then
 				InternalConfigs:ApplyConfigs(nil, newAssignedConfigs.variables, newAssignedConfigs.options.privacy)
 			else
 				InternalConfigs:ApplyConfigs(
 					nil,
-					Experiments.canonicalServerConfig.variables,
-					Experiments.canonicalServerConfig.options.privacy
+					ABTesting.canonicalServerConfig.variables,
+					ABTesting.canonicalServerConfig.options.privacy
 				)
 			end
 		end
 	end)
 
-	-- When players' assigned experiment config changes, update per-player internal configs
-	Experiments.onAssignedPlayerConfigChanged:Connect(function (player, newAssignedConfigs)
+	-- When players' assigned A/B testing campaign config changes, update per-player internal configs
+	ABTesting.onAssignedPlayerConfigChanged:Connect(function (player, newAssignedConfigs)
 		if InternalConfigs:IsReady() then
 			if newAssignedConfigs then
 				InternalConfigs:ApplyConfigs(player, newAssignedConfigs.variables, newAssignedConfigs.options.privacy)
