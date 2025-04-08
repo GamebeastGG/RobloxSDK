@@ -21,6 +21,12 @@ utilities.GBWarn = function(message)
 	end
 end
 
+utilities.GBLog = function (...)
+	if DataCache:Get("Settings").sdkDebugEnabled then
+		print("GamebeastSDK:", ...)
+	end
+end
+
 utilities.resolvePlayerObject = function(playerQuery : Player | number)
 	if typeof(playerQuery) == "number" then
 		return game.Players:GetPlayerByUserId(playerQuery)

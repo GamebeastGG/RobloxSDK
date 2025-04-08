@@ -48,6 +48,7 @@ type PublicModuleData = {
 local DEFAULT_SETTINGS = {
 	sdkWarningsEnabled = true,
 	includeWarningStackTrace = false,
+	sdkDebugEnabled = false,
 }
 
 --= Object References =--

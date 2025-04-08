@@ -23,7 +23,8 @@ local RunService = game:GetService("RunService")
 --= Dependencies =--
 
 local GBRequests = shared.GBMod("GBRequests")
-local ABTesting = shared.GBMod("ABTesting")
+local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module EngagementMarkers
+local Experiments = shared.GBMod("Experiments") ---@module Experiments
 local Utilities = shared.GBMod("Utilities")
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
 local Signal = shared.GBMod("Signal")
@@ -34,6 +35,16 @@ local MetaData = shared.GBMod("MetaData") ---@module MetaData
 --= Constants =--
 
 local BACKUP_STORE_KEY = (RunService:IsStudio() and "Studio" or "") .. "GBConfigBackup"
+
+--[[
+	When config is being applied, this controls the maximum amount of seconds
+	to wait for initial experiment assignment to complete before giving up
+	and using the canonical config.
+
+	If it takes longer, it will continue waiting for assignment to complete in the
+	background, and apply assigned configs as they are received.
+]]
+local MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME = 5
 
 --= Object References =--
 
@@ -81,25 +92,49 @@ function Updater:UpdateConfigs(newConfigs, init)
 	-- ABTesting is integral to the configs, but it cant be a leaf.
 	-- Maybe we have it listen and then fire 
 
-	local configsToIntegrate, configName = ABTesting:GetConfigProfileForServer(newConfigs)
-	
-	-- This block is irrelevant now with sending analytics data through as markers with the partition ID contained
-	---- If we were on a server A/B testing campaign
-	--if curPartition ~= "" then
-	--	if shared.GBMod("ABTesting").getNumPartitions(newConfigs) == 0 then
-	--		-- We were on a server campaign but now we're not
-	--	elseif not newConfigs.GBConfigs.ABTestingCampaigns.partitions[curPartition] then
-	--		-- A new server campaign was deployed, last terminated
-	--	end
-	--end
- 
-	ABTesting:SetCurrentPartition(configName)
+	-- Trigger experiment assignment, if applicable
+	-- (this may yield, so it's limited by a timer to avoid blocking config readiness for too long)
+	do
+		local thread = coroutine.running()
+		local didResume = false
+		task.spawn(function ()
+			Experiments:updateStateFromAvailableCampaigns(newConfigs["GBConfigs"].ABTestingCampaigns, {
+				variables = newConfigs.configs,
+				options = newConfigs.options,
+			})
+			if not didResume then
+				didResume = true
+				coroutine.resume(thread)
+			end
+		end)
+		task.delay(MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME, function()
+			if not didResume then
+				didResume = true
+				Utilities.GBWarn("Initial experiment assignment taking unusually long, temporarily falling back to canonical config")
+				coroutine.resume(thread)
+			end
+		end)
+		if not didResume then
+			coroutine.yield()
+		end
+	end
 
-	-- Integrate new configs
+	-- If players are assigned to an experiment, use that config for them
+	for player, playerConfigs in Experiments.assignedConfigByPlayer do
+		InternalConfigs:ApplyConfigs(player, playerConfigs.variables, playerConfigs.options.privacy, init)
+	end
 
-	InternalConfigs:ApplyConfigs(configsToIntegrate, (newConfigs.options.privacy or {}), init)
-
-
+	-- If server is assigned to an experiment, use that config, otherwise use canonical config
+	if Experiments.assignedServerConfig then
+		InternalConfigs:ApplyConfigs(
+			nil,
+			Experiments.assignedServerConfig.variables,
+			Experiments.assignedServerConfig.options.privacy,
+			init
+		)
+	else
+		InternalConfigs:ApplyConfigs(nil, newConfigs.configs, newConfigs.options.privacy, init)
+	end
 
 	--[[ Signal mod update
 	if not init then
@@ -176,12 +211,41 @@ function Updater:Init()
 		end
 	end
 
+	-- Update marker properties when experiments are running
+	Experiments.onServerPartitionIdChanged:Connect(function (partitionId)
+		EngagementMarkers:SetServerExperimentPartitionId(partitionId)
+	end)
+	Experiments.onPlayerPartitionIdChanged:Connect(function (player, partitionId)
+		EngagementMarkers:SetPlayerExperimentPartitionId(player, partitionId)
+	end)
 
 	-- Update configs for server with initialization flag
 	self:UpdateConfigs(newConfigs, true)
 
-	ABTesting.NewConfigSignal:Connect(function(...)
-		self:UpdateConfigs(...)
+	-- When the server's assigned experiment config changes, update the internal configs
+	Experiments.onAssignedServerConfigChanged:Connect(function (newAssignedConfigs)
+		if InternalConfigs:IsReady() then
+			if newAssignedConfigs then
+				InternalConfigs:ApplyConfigs(nil, newAssignedConfigs.variables, newAssignedConfigs.options.privacy)
+			else
+				InternalConfigs:ApplyConfigs(
+					nil,
+					Experiments.canonicalServerConfig.variables,
+					Experiments.canonicalServerConfig.options.privacy
+				)
+			end
+		end
+	end)
+
+	-- When players' assigned experiment config changes, update per-player internal configs
+	Experiments.onAssignedPlayerConfigChanged:Connect(function (player, newAssignedConfigs)
+		if InternalConfigs:IsReady() then
+			if newAssignedConfigs then
+				InternalConfigs:ApplyConfigs(player, newAssignedConfigs.variables, newAssignedConfigs.options.privacy)
+			else
+				InternalConfigs:ApplyConfigs(player, nil, nil)
+			end
+		end
 	end)
 end
 

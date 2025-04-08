@@ -13,6 +13,7 @@
 local InternalConfigs = { }
 
 --= Roblox Services =--
+local Players = game:GetService("Players")
 
 --= Dependencies =--
 
@@ -39,12 +40,23 @@ local ConfigsReady = false
 local ActiveConfigs = {
 	--Full dev defined configuration profile
 	DevConfigs = {},
+
+	-- Per-player dev-defined configuration profiles
+	DevConfigsByPlayer = {} :: {
+		[Player]: {
+			[string]: any,
+		}
+	},
+
 	--Metadata sent along with dev defined configs
 	GBConfigs = {},
 	--Set of client accessible configs
 	ClientConfigs = {}
 }
 local CurrentClientPrivacy = {}
+local CurrentClientPrivacyByPlayer = {} :: {
+	[Player]: {{string}},
+}
 --[[ Full dev defined configuration profile
 ActiveConfigs.DevConfigs = {}
 -- Metadata sent along with dev defined configs
@@ -56,8 +68,8 @@ configsMod.clientConfigs = {}]]
 
 --= Internal Functions =--
 
-local function IsPathPrivate(path : {string}) : boolean
-	for _, privacyPath in CurrentClientPrivacy do -- a, d, e
+local function IsPathPrivate(path : {string}, privatePaths: {{string}}) : boolean
+	for _, privacyPath in privatePaths do
 		if #privacyPath > #path then
 			continue
 		end
@@ -78,13 +90,12 @@ local function IsPathPrivate(path : {string}) : boolean
 	return false
 end
 
-local function FilterConfigForClient(path : {string}, config : {[string] : any}) : {[string] : any}
+local function FilterConfigForClient(path : {string}, config : {[string] : any}, privacyConfig: {{string}}) : {[string] : any}
 	if type(config) ~= "table" then
 		return config
 	end
 
 	local configCopy = Utilities.recursiveCopy(config)
-	local privacyConfig = CurrentClientPrivacy
 
 	-- Determine if the path is a match for any privacy paths
 	local targetPaths = {}
@@ -149,13 +160,17 @@ function InternalConfigs:WaitForConfigsReady() : true
 	return true
 end
 
-function InternalConfigs:OnChanged(targetConfig : string | {string}, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
+function InternalConfigs:OnChanged(player: Player?, targetConfig : string | {string}, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
 	if type(targetConfig) == "string" then
 		targetConfig = {targetConfig}
 	end
 
 	-- Establish bindable connection
-	return BatchConfigUpdatedSignal:Connect(function(changes : {{path : {string}, newValue : any, oldValue : any}}, oldConfigs : any)
+	return BatchConfigUpdatedSignal:Connect(function(updatedPlayer: Player?, changes : {{path : {string}, newValue : any, oldValue : any}}, oldConfigs : any)
+		if updatedPlayer ~= player then
+			return
+		end
+
 		for _, change in changes do
 			local match = true
 			for index, path in targetConfig do
@@ -166,7 +181,7 @@ function InternalConfigs:OnChanged(targetConfig : string | {string}, callback : 
 			end
 
 			if match then
-				callback(self:Get(targetConfig), self:Get(targetConfig, oldConfigs))
+				callback(self:Get(player, targetConfig), self:Get(player, targetConfig, oldConfigs))
 				break
 			end
 		end
@@ -228,10 +243,22 @@ function InternalConfigs:ApplyInternalConfigs(newGBConfigs)
 	--EventDataUpdatedRemote:FireAllClients(newConfigs["GBEventData"])
 end
 
-function InternalConfigs:ApplyConfigs(newConfigs, privacyConfig : { {string} }, init : boolean?)
-	local oldConfigs = Utilities.recursiveCopy(ActiveConfigs.DevConfigs)
-	
-	CurrentClientPrivacy =  privacyConfig--{{"a", "c"}, {"a", "d", "e"}} --  
+function InternalConfigs:ApplyConfigs(player: Player?, newConfigs: {[string]: any}?, privacyConfig : { {string} }?, init : boolean?)
+	if not player then
+		assert(newConfigs, "Server configs cannot be cleared")
+		assert(privacyConfig, "Server config privacy cannot be cleared")
+	end
+
+	local oldConfigs = Utilities.recursiveCopy(player
+		and ActiveConfigs.DevConfigsByPlayer[player]
+		or ActiveConfigs.DevConfigs
+	)
+
+	if player then
+		CurrentClientPrivacyByPlayer[player] = privacyConfig
+	else
+		CurrentClientPrivacy = privacyConfig
+	end
 	-- We can't recurse over a "config metadata object" unless we make a reserved key for the metadata and preserve the structure of the config object
 	-- Create a config-wide metadata key to avoid collisions with config object structure.
 	-- Can store metadata + key in configs mod in the future if there's other relevant metadata we want to access at any time.
@@ -241,7 +268,9 @@ function InternalConfigs:ApplyConfigs(newConfigs, privacyConfig : { {string} }, 
 	
 	-- Freeze new configs to prevent modification
 	local function recursiveFreeze(configs)
-		table.freeze(configs)
+		if not table.isfrozen(configs) then
+			table.freeze(configs)
+		end
 		for _, value in configs do
 			if type(value) == "table" then
 				recursiveFreeze(value)
@@ -249,24 +278,48 @@ function InternalConfigs:ApplyConfigs(newConfigs, privacyConfig : { {string} }, 
 		end
 	end
 
-	recursiveFreeze(newConfigs)
-	ActiveConfigs.DevConfigs = newConfigs
+	if newConfigs then
+		recursiveFreeze(newConfigs)
+	end
+
+	if player then
+		ActiveConfigs.DevConfigsByPlayer[player] = newConfigs
+
+		-- If per-player config is being cleared, revert to global config
+		if newConfigs == nil then
+			newConfigs = ActiveConfigs.DevConfigs
+		end
+		if privacyConfig == nil then
+			privacyConfig = CurrentClientPrivacy
+		end
+	else
+		ActiveConfigs.DevConfigs = newConfigs
+	end
 
 	if init ~= true then
 		local changedBatch = InternalConfigs:_checkConfigChanged(oldConfigs, newConfigs)
 
 		if #changedBatch > 0 then
-			BatchConfigUpdatedSignal:Fire(changedBatch, oldConfigs)
+			BatchConfigUpdatedSignal:Fire(player, changedBatch, oldConfigs)
 
 			local filteredChanges = {}
 			for _, change in changedBatch do
-				if not IsPathPrivate(change.path) then
-					change.newValue = FilterConfigForClient(change.path, change.newValue)
+				if not IsPathPrivate(change.path, privacyConfig) then
+					change.newValue = FilterConfigForClient(change.path, change.newValue, privacyConfig)
 					table.insert(filteredChanges, change)
 				end
 			end
 
-			ConfigChangedRemote:FireAllClients(filteredChanges)
+			if player then
+				ConfigChangedRemote:FireClient(player, filteredChanges)
+			else
+				-- Only send server config changes to players who don't have individually-defined
+				for _, potentialPlayer in Players:GetPlayers() do
+					if not ActiveConfigs.DevConfigsByPlayer[potentialPlayer] then
+						ConfigChangedRemote:FireClient(potentialPlayer, filteredChanges)
+					end
+				end
+			end
 		end
 	end
 
@@ -284,13 +337,8 @@ function InternalConfigs:ApplyConfigs(newConfigs, privacyConfig : { {string} }, 
 	--ConfigUpdatedSignal:Fire(path, newValue, oldValue)
 end
 
--- Returns a copy of the active dev configs
-function InternalConfigs:CopyConfigs()
-	return Utilities.recursiveCopy(ActiveConfigs.DevConfigs)
-end
-
 -- Get the value of a specific config
-function InternalConfigs:Get(path : string | { string }, configsOverride : any?) : any
+function InternalConfigs:Get(player: Player?, path : string | { string }, configsOverride : any?) : any
 	if typeof(path) ~= "table" and typeof(path) ~= "string" then
 		Utilities.GBWarn("Config path must be a string or list of strings.")
 		return nil
@@ -302,7 +350,11 @@ function InternalConfigs:Get(path : string | { string }, configsOverride : any?)
 		self:WaitForConfigsReady()
 	end
 
-	local value = configsOverride or ActiveConfigs.DevConfigs
+	local configs = player
+		and ActiveConfigs.DevConfigsByPlayer[player]
+		or ActiveConfigs.DevConfigs
+
+	local value = configsOverride or configs
 	for _, key in ipairs(path) do
 		value = value[key]
 
@@ -333,17 +385,23 @@ end
 function InternalConfigs:Init()
 
 	-- Call Get for clients and return value.
-	GetConfigRemoteFunc.OnServerInvoke = function(_, path)
+	GetConfigRemoteFunc.OnServerInvoke = function (player: Player, path: {string}?)
 		self:WaitForConfigsReady()
+
+		local privatePaths = CurrentClientPrivacyByPlayer[player] or CurrentClientPrivacy
+
 		if path == nil then
-			return FilterConfigForClient({}, ActiveConfigs.DevConfigs)
+			local playerConfig = player
+				and ActiveConfigs.DevConfigsByPlayer[player]
+				or ActiveConfigs.DevConfigs
+			return FilterConfigForClient({}, playerConfig, privatePaths)
 		end
 
-		if IsPathPrivate(path) then
+		if IsPathPrivate(path, privatePaths) then
 			return nil
 		end
 
-		return FilterConfigForClient(path, self:Get(path))
+		return FilterConfigForClient(path, self:Get(player, path), privatePaths)
 		-- NOTE: We'll want to modify to reflect privacy. To be most efficient, we can create a get function that references a
 		-- "client" config set that essentially recursively copies the set of configs only assigning a value if it has client accessibility.
 		-- This means we only every make one copy of a table rather than on every client request.

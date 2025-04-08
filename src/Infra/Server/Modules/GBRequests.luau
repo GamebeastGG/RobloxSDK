@@ -44,7 +44,8 @@ local ENDPOINTS = {
 			["v1/configurations"] = "GET",
 			["v1/heatmap"] = "POST",
 			["v1/heatmap/waypoint"] = "POST",
-			["v1/latest/version?platform=roblox"] = "GET"
+			["v1/latest/version?platform=roblox"] = "GET",
+			["v1/experiments/assignments"] = "POST",
 		}
 	}
 }
@@ -117,8 +118,6 @@ function GBRequests:GBRequestAsync(requestType : string, args : {[string] : any}
 	local requestBody
 	args = args or {}
 
-	local partition = shared.GBMod("ABTesting").CUR_PARTITION
-
 	local authKey = YeildForKey()
 
 	-- Define relevant headers. Backend enforces header presence unless specified.
@@ -127,8 +126,6 @@ function GBRequests:GBRequestAsync(requestType : string, args : {[string] : any}
 		["isstudio"] = tostring(RunService:IsStudio()),
 		["sdkversion"] = MetaData.version,
 		["universeid"] = tostring(game.GameId),
-		-- optional, to be removed with A/B testing overhaul
-		["partitionid"] = partition ~= "" and partition or nil,
 	}
 
 	-- JobId is undefined in studio so send a hard coded default for this environment

@@ -3,6 +3,8 @@ type SDKSettings = {
 	sdkWarningsEnabled : boolean,
 	-- Enables stack trace inclusion with warning messages.
 	includeWarningStackTrace : boolean,
+	-- Enables SDK debug messages for internal state changes, etc.
+	sdkDebugEnabled : boolean,
 }
 export type ServerSetupConfig = {
 	key : string | Secret,
