@@ -98,7 +98,7 @@ function Updater:UpdateConfigs(newConfigs, init)
 		local thread = coroutine.running()
 		local didResume = false
 		task.spawn(function ()
-			ABTesting:updateStateFromAvailableCampaigns(newConfigs["GBConfigs"].ABTestingCampaigns, {
+			ABTesting:UpdateStateFromAvailableCampaigns(newConfigs["GBConfigs"].ABTestingCampaigns, {
 				variables = newConfigs.configs,
 				options = newConfigs.options,
 			})
@@ -120,16 +120,16 @@ function Updater:UpdateConfigs(newConfigs, init)
 	end
 
 	-- If players are assigned to an A/B testing campaign, use that config for them
-	for player, playerConfigs in ABTesting.assignedConfigByPlayer do
+	for player, playerConfigs in ABTesting.AssignedConfigByPlayer do
 		InternalConfigs:ApplyConfigs(player, playerConfigs.variables, playerConfigs.options.privacy, init)
 	end
 
 	-- If server is assigned to an A/B testing campaign, use that config, otherwise use canonical config
-	if ABTesting.assignedServerConfig then
+	if ABTesting.AssignedServerConfig then
 		InternalConfigs:ApplyConfigs(
 			nil,
-			ABTesting.assignedServerConfig.variables,
-			ABTesting.assignedServerConfig.options.privacy,
+			ABTesting.AssignedServerConfig.variables,
+			ABTesting.AssignedServerConfig.options.privacy,
 			init
 		)
 	else
@@ -212,10 +212,10 @@ function Updater:Init()
 	end
 
 	-- Update marker properties when A/B testing campaigns are running
-	ABTesting.onServerPartitionIdChanged:Connect(function (partitionId)
+	ABTesting.OnServerPartitionIdChanged:Connect(function (partitionId)
 		EngagementMarkers:SetServerExperimentPartitionId(partitionId)
 	end)
-	ABTesting.onPlayerPartitionIdChanged:Connect(function (player, partitionId)
+	ABTesting.OnPlayerPartitionIdChanged:Connect(function (player, partitionId)
 		EngagementMarkers:SetPlayerExperimentPartitionId(player, partitionId)
 	end)
 
@@ -223,22 +223,22 @@ function Updater:Init()
 	self:UpdateConfigs(newConfigs, true)
 
 	-- When the server's assigned A/B testing campaign config changes, update the internal configs
-	ABTesting.onAssignedServerConfigChanged:Connect(function (newAssignedConfigs)
+	ABTesting.OnAssignedServerConfigChanged:Connect(function (newAssignedConfigs)
 		if InternalConfigs:IsReady() then
 			if newAssignedConfigs then
 				InternalConfigs:ApplyConfigs(nil, newAssignedConfigs.variables, newAssignedConfigs.options.privacy)
 			else
 				InternalConfigs:ApplyConfigs(
 					nil,
-					ABTesting.canonicalServerConfig.variables,
-					ABTesting.canonicalServerConfig.options.privacy
+					ABTesting.CanonicalServerConfig.variables,
+					ABTesting.CanonicalServerConfig.options.privacy
 				)
 			end
 		end
 	end)
 
 	-- When players' assigned A/B testing campaign config changes, update per-player internal configs
-	ABTesting.onAssignedPlayerConfigChanged:Connect(function (player, newAssignedConfigs)
+	ABTesting.OnAssignedPlayerConfigChanged:Connect(function (player, newAssignedConfigs)
 		if InternalConfigs:IsReady() then
 			if newAssignedConfigs then
 				InternalConfigs:ApplyConfigs(player, newAssignedConfigs.variables, newAssignedConfigs.options.privacy)

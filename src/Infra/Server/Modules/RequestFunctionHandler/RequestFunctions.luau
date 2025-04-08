@@ -135,14 +135,14 @@ requestFunctions.funcs = {
 	-- async: false
 	["PropagateAvailableCampaigns"] = function (request)
 		Utilities.GBLog("Received campaign update request", request)
-		ABTesting:updateStateFromAvailableCampaigns(request.args)
+		ABTesting:UpdateStateFromAvailableCampaigns(request.args)
 	end,
 
 	-- host_only: false
 	-- async: false
 	["PropagateCampaignReassignment"] = function (request)
 		Utilities.GBLog("Received campaign reassignment request", request)
-		ABTesting:processCampaignReassignmentRequest(request.args)
+		ABTesting:ProcessCampaignReassignmentRequest(request.args)
 	end,
 
 	

@@ -83,17 +83,17 @@ local knownPartitions = {} :: {[number]: AvailableCampaignPartitionSnapshot}
 ]]
 local assignmentWakeUpTimersByFuturePartitionId = {} :: {[number]: thread}
 
-ABTesting.assignedServerPartitionId = nil :: number?
-ABTesting.assignedPartitionIdByPlayer = {} :: {[Player]: number}
-ABTesting.onServerPartitionIdChanged = Signal.new()
-ABTesting.onPlayerPartitionIdChanged = Signal.new()
+ABTesting.AssignedServerPartitionId = nil :: number?
+ABTesting.AssignedPartitionIdByPlayer = {} :: {[Player]: number}
+ABTesting.OnServerPartitionIdChanged = Signal.new()
+ABTesting.OnPlayerPartitionIdChanged = Signal.new()
 
-ABTesting.assignedServerConfig = nil :: ConfigSnapshot?
-ABTesting.assignedConfigByPlayer = {} :: {[Player]: ConfigSnapshot}
-ABTesting.onAssignedServerConfigChanged = Signal.new()
-ABTesting.onAssignedPlayerConfigChanged = Signal.new()
+ABTesting.AssignedServerConfig = nil :: ConfigSnapshot?
+ABTesting.AssignedConfigByPlayer = {} :: {[Player]: ConfigSnapshot}
+ABTesting.OnAssignedServerConfigChanged = Signal.new()
+ABTesting.OnAssignedPlayerConfigChanged = Signal.new()
 
-ABTesting.canonicalServerConfig = nil :: ConfigSnapshot?
+ABTesting.CanonicalServerConfig = nil :: ConfigSnapshot?
 
 --[[
 	Updates whether assignments are being requested or not, based on the given
@@ -102,12 +102,12 @@ ABTesting.canonicalServerConfig = nil :: ConfigSnapshot?
 	If assignment is triggered on, this will yield as it requests and waits for
 	the initial assignments to be received from the backend.
 ]]
-function ABTesting:updateStateFromAvailableCampaigns(
+function ABTesting:UpdateStateFromAvailableCampaigns(
 	availableCampaignsSnapshot: AvailableCampaignsSnapshot,
 	canonicalServerConfig: ConfigSnapshot?
 )
 	if canonicalServerConfig then
-		ABTesting.canonicalServerConfig = canonicalServerConfig
+		ABTesting.CanonicalServerConfig = canonicalServerConfig
 	end
 
 	-- Ignore older snapshots (e.g. from config change jobs, which take longer to propagate to gameservers)
@@ -133,8 +133,8 @@ function ABTesting:updateStateFromAvailableCampaigns(
 	-- Clear local assignments for campaigns that have been terminated
 	if currentAssignmentState then
 		local terminatedPartitionIds: {number} = {}
-		if ABTesting.assignedServerPartitionId and not snapshotPartitionIdSet[ABTesting.assignedServerPartitionId] then
-			table.insert(terminatedPartitionIds, ABTesting.assignedServerPartitionId)
+		if ABTesting.AssignedServerPartitionId and not snapshotPartitionIdSet[ABTesting.AssignedServerPartitionId] then
+			table.insert(terminatedPartitionIds, ABTesting.AssignedServerPartitionId)
 		end
 		for partitionId in currentAssignmentState.activePartitionStateById do
 			if not snapshotPartitionIdSet[partitionId] then
@@ -199,7 +199,7 @@ end
 	Processes a request from the backend to trigger requesting assignments for
 	specific players and servers.
 ]]
-function ABTesting:processCampaignReassignmentRequest(request: CampaignReassignmentPropagationRequest)
+function ABTesting:ProcessCampaignReassignmentRequest(request: CampaignReassignmentPropagationRequest)
 	local currentGameserverId = if game.JobId == ""
 		then "00000000-0000-0000-0000-000000000000"
 		else game.JobId
@@ -235,7 +235,7 @@ function startRequestingAssignment()
 	currentAssignmentState = {
 		playerIdsPendingAssignment = {},
 		playerJoinListener = Players.PlayerAdded:Connect(function (player)
-			if not ABTesting.assignedServerPartitionId then
+			if not ABTesting.AssignedServerPartitionId then
 				queueAssignment({ player })
 			end
 		end),
@@ -270,7 +270,7 @@ function stopRequestingAssignment()
 
 	-- Clear current assignments
 	setAssignedServerPartitionId(nil)
-	for player in ABTesting.assignedPartitionIdByPlayer do
+	for player in ABTesting.AssignedPartitionIdByPlayer do
 		setAssignedPlayerPartitionId(player, nil)
 	end
 
@@ -376,7 +376,7 @@ function executeAssignmentRequest()
 		setAssignedServerPartitionId(response.gameserverPartitionId)
 
 		-- Clear previous per-player assignments, if any
-		for player in ABTesting.assignedPartitionIdByPlayer do
+		for player in ABTesting.AssignedPartitionIdByPlayer do
 			setAssignedPlayerPartitionId(player, nil)
 		end
 
@@ -399,7 +399,7 @@ end
 function setAssignedPlayerPartitionId(player: Player, partitionId: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
 
-	local previousPartitionId = ABTesting.assignedPartitionIdByPlayer[player]
+	local previousPartitionId = ABTesting.AssignedPartitionIdByPlayer[player]
 	if previousPartitionId == partitionId then
 		return
 	end
@@ -418,13 +418,13 @@ function setAssignedPlayerPartitionId(player: Player, partitionId: number?)
 		end
 	end
 
-	ABTesting.assignedPartitionIdByPlayer[player] = partitionId
-	ABTesting.onPlayerPartitionIdChanged:Fire(player, partitionId)
+	ABTesting.AssignedPartitionIdByPlayer[player] = partitionId
+	ABTesting.OnPlayerPartitionIdChanged:Fire(player, partitionId)
 
 	if partitionId then
 		local partition = knownPartitions[partitionId]
-		ABTesting.assignedConfigByPlayer[player] = partition.configs
-		ABTesting.onAssignedPlayerConfigChanged:Fire(player, partition.configs)
+		ABTesting.AssignedConfigByPlayer[player] = partition.configs
+		ABTesting.OnAssignedPlayerConfigChanged:Fire(player, partition.configs)
 
 		if currentAssignmentState.activePartitionStateById[partitionId] then
 			currentAssignmentState.activePartitionStateById[partitionId].playerSet[player] = true
@@ -450,15 +450,15 @@ function setAssignedPlayerPartitionId(player: Player, partitionId: number?)
 
 	-- If unassigning from a partition, clear the assigned config
 	else
-		ABTesting.assignedConfigByPlayer[player] = nil
-		ABTesting.onAssignedPlayerConfigChanged:Fire(player, nil)
+		ABTesting.AssignedConfigByPlayer[player] = nil
+		ABTesting.OnAssignedPlayerConfigChanged:Fire(player, nil)
 	end
 end
 
 function setAssignedServerPartitionId(partitionId: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
 
-	local previousPartitionId = ABTesting.assignedServerPartitionId
+	local previousPartitionId = ABTesting.AssignedServerPartitionId
 	if previousPartitionId == partitionId then
 		return
 	end
@@ -472,13 +472,13 @@ function setAssignedServerPartitionId(partitionId: number?)
 		currentAssignmentState.activePartitionStateById[previousPartitionId] = nil
 	end
 
-	ABTesting.assignedServerPartitionId = partitionId
-	ABTesting.onServerPartitionIdChanged:Fire(partitionId)
+	ABTesting.AssignedServerPartitionId = partitionId
+	ABTesting.OnServerPartitionIdChanged:Fire(partitionId)
 
 	if partitionId then
 		local partition = knownPartitions[partitionId]
-		ABTesting.assignedServerConfig = partition.configs
-		ABTesting.onAssignedServerConfigChanged:Fire(partition.configs)
+		ABTesting.AssignedServerConfig = partition.configs
+		ABTesting.OnAssignedServerConfigChanged:Fire(partition.configs)
 
 		currentAssignmentState.activePartitionStateById[partitionId] = {
 			playerSet = {},
@@ -495,8 +495,8 @@ function setAssignedServerPartitionId(partitionId: number?)
 		end
 
 	else
-		ABTesting.assignedServerConfig = nil
-		ABTesting.onAssignedServerConfigChanged:Fire(nil)
+		ABTesting.AssignedServerConfig = nil
+		ABTesting.OnAssignedServerConfigChanged:Fire(nil)
 	end
 end
 
@@ -516,7 +516,7 @@ function clearTerminatedPartitionAssignments(terminatedPartitionIds: {number})
 			end
 		end
 
-		if ABTesting.assignedServerPartitionId == partitionId then
+		if ABTesting.AssignedServerPartitionId == partitionId then
 			Utilities.GBLog("Queuing reassignment for server from terminated partition:", partitionId)
 			didUnassignServer = true
 		end
