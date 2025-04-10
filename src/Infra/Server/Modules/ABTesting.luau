@@ -1,4 +1,4 @@
-----!strict
+--!strict
 local ABTesting = {}
 
 -- Services
@@ -26,7 +26,7 @@ type AvailableCampaignPartitionSnapshot = {
 type AvailableCampaignsSnapshot = {
 	timestampMs: number,
 	partitions: {AvailableCampaignPartitionSnapshot},
-	scheduled: {[string]: number},
+	scheduled: {[string]: {number}},
 }
 type CampaignReassignmentPropagationRequest = {
 	playerIds: {number},
@@ -53,27 +53,29 @@ local currentAssignmentState: {
 	playerLeaveListener: RBXScriptConnection,
 	deferredBulkAssignmentThread: thread?,
 	activePartitionStateById: {[number]: {
+		partition: AvailableCampaignPartitionSnapshot,
 		playerSet: {[Player]: true},
 		campaignEndTimer: thread?,
 	}},
 
 	--[[
-		Set of partitions we are aware are active, but have not received yet (e.g. if a campaign
-		was scheduled to start in the future).
+		State for partitions we know are active, but haven't received yet from snapshots or
+		assignment responses (i.e. if a future-scheduled partition has started).
 
-		Once a partition is received, it is removed from this set.
+		This is initialized by `initializeUnfetchedActivePartitionState()` when a
+		scheduled partition starts.
+
+		Once a partition is received, or if it ends before being received, it is removed
+		from this map when `clearUnfetchedActivePartitionState()` is called.
 	]]
-	unfetchedActivePartitionIdSet: {[number]: true},
+	unfetchedActivePartitionStateById: {[number]: {
+		endTime: number?,
+		campaignEndTimer: thread?,
+	}},
 
 }? = nil
 
 local lastAvailableCampaignsSnapshot = nil :: AvailableCampaignsSnapshot?
-
---[[
-	Cache of partitions that have been received from the backend (from available
-	campaign snapshots, and assignment responses)
-]]
-local knownPartitions = {} :: {[number]: AvailableCampaignPartitionSnapshot}
 
 --[[
 	Map of partition IDs scheduled to start in the future, and their corresponding
@@ -84,7 +86,7 @@ local knownPartitions = {} :: {[number]: AvailableCampaignPartitionSnapshot}
 local assignmentWakeUpTimersByFuturePartitionId = {} :: {[number]: thread}
 
 ABTesting.AssignedServerPartitionId = nil :: number?
-ABTesting.AssignedPartitionIdByPlayer = {} :: {[Player]: number}
+ABTesting.AssignedPartitionIdByPlayer = {} :: {[Player]: number?}
 ABTesting.OnServerPartitionIdChanged = Signal.new()
 ABTesting.OnPlayerPartitionIdChanged = Signal.new()
 
@@ -110,57 +112,75 @@ function ABTesting:UpdateStateFromAvailableCampaigns(
 		ABTesting.CanonicalServerConfig = canonicalServerConfig
 	end
 
-	-- Ignore older snapshots (e.g. from config change jobs, which take longer to propagate to gameservers)
+	-- Ignore older snapshots (e.g. from old config change jobs, which take longer to propagate to gameservers)
 	if lastAvailableCampaignsSnapshot and (lastAvailableCampaignsSnapshot.timestampMs >= availableCampaignsSnapshot.timestampMs) then
 		return
 	end
 	lastAvailableCampaignsSnapshot = availableCampaignsSnapshot
 
-	-- Cache partition configs
+	-- Start requesting assignment if there are any available campaigns
 	local availablePartitions = availableCampaignsSnapshot.partitions
-	local snapshotPartitionIdSet = {} :: {[number]: true}
-	for _, partition in availablePartitions do
-		knownPartitions[partition.id] = partition
-		snapshotPartitionIdSet[partition.id] = true
-
-		-- If partition was considered unfetched (e.g. from having been scheduled for the future), remove it from the set
-		if currentAssignmentState and currentAssignmentState.unfetchedActivePartitionIdSet[partition.id] then
-			currentAssignmentState.unfetchedActivePartitionIdSet[partition.id] = nil
-			Utilities.GBLog("Unfetched partition received, removed from set:", partition.id)
-		end
+	local wasAssignmentAlreadyEnabled = (currentAssignmentState ~= nil)
+	if #availablePartitions > 0 and not currentAssignmentState then
+		enableAssignment()
+	elseif #availablePartitions == 0 and currentAssignmentState then
+		disableAssignment()
 	end
 
-	-- Clear local assignments for campaigns that have been terminated
+	-- If assignment is enabled, apply changes from the snapshot to its state
 	if currentAssignmentState then
-		local terminatedPartitionIds: {number} = {}
-		if ABTesting.AssignedServerPartitionId and not snapshotPartitionIdSet[ABTesting.AssignedServerPartitionId] then
-			table.insert(terminatedPartitionIds, ABTesting.AssignedServerPartitionId)
-		end
-		for partitionId in currentAssignmentState.activePartitionStateById do
-			if not snapshotPartitionIdSet[partitionId] then
-				table.insert(terminatedPartitionIds, partitionId)
-			end
-		end
-		Utilities.GBLog("Terminated partitions:", terminatedPartitionIds)
-		if #terminatedPartitionIds > 0 then
-			clearTerminatedPartitionAssignments(terminatedPartitionIds)
+
+		-- Cache received partition configs
+		local snapshotPartitionIdSet = {} :: {[number]: true}
+		for _, partition in availablePartitions do
+			snapshotPartitionIdSet[partition.id] = true
+			initializeActivePartitionState(partition)
+			clearUnfetchedActivePartitionState(partition.id)
 		end
 
-		-- Clear terminated unfetched partitions
-		for partitionId in currentAssignmentState.unfetchedActivePartitionIdSet do
-			if not snapshotPartitionIdSet[partitionId] then
-				Utilities.GBLog("Unfetched partition terminated:", partitionId)
-				currentAssignmentState.unfetchedActivePartitionIdSet[partitionId] = nil
+		-- If snapshot just enabled assignment, trigger and wait for initial assignment
+		if not wasAssignmentAlreadyEnabled then
+			executeAssignmentRequest()
+
+		-- If snapshot didn't just enable assignment, update partition state based on it
+		else
+			-- Clear terminated unfetched partitions
+			for partitionId in currentAssignmentState.unfetchedActivePartitionStateById do
+				if not snapshotPartitionIdSet[partitionId] then
+					Utilities.GBLog("Unfetched partition terminated:", partitionId)
+					clearUnfetchedActivePartitionState(partitionId)
+				end
+			end
+
+			-- Clear local assignments for campaigns that have been terminated
+			local terminatedPartitionIds: {number} = {}
+			if ABTesting.AssignedServerPartitionId and not snapshotPartitionIdSet[ABTesting.AssignedServerPartitionId] then
+				table.insert(terminatedPartitionIds, ABTesting.AssignedServerPartitionId)
+			end
+			for partitionId in currentAssignmentState.activePartitionStateById do
+				if not snapshotPartitionIdSet[partitionId] then
+					table.insert(terminatedPartitionIds, partitionId)
+				end
+			end
+			if #terminatedPartitionIds > 0 then
+				Utilities.GBLog("Clearing terminated partitions:", terminatedPartitionIds)
+				reassignTerminatedPartitionMembers(terminatedPartitionIds)
+				for _, partitionId in terminatedPartitionIds do
+					clearActivePartitionState(partitionId, true)
+				end
 			end
 		end
 	end
 
 	-- Schedule assignment wake-up timers for future campaigns
-	for partitionIdKey, startTimeMs in availableCampaignsSnapshot.scheduled do
+	for partitionIdKey, timestamps in availableCampaignsSnapshot.scheduled do
 		local partitionId = tonumber(partitionIdKey) :: number
 		if assignmentWakeUpTimersByFuturePartitionId[partitionId] then
 			continue
 		end
+
+		local startTimeMs = timestamps[1]
+		local endTimeMs = timestamps[2] :: number?
 
 		local secondsUntilStart = math.max(0, startTimeMs - DateTime.now().UnixTimestampMillis) / 1000
 		Utilities.GBLog("Scheduling future partition wake-up timer:", partitionId, startTimeMs, "in", secondsUntilStart, "sec")
@@ -169,12 +189,12 @@ function ABTesting:UpdateStateFromAvailableCampaigns(
 
 			if not currentAssignmentState then
 				Utilities.GBLog("Future partition", partitionId, "started, enabling assignment")
-				startRequestingAssignment()
+				enableAssignment()
 			else
 				Utilities.GBLog("Future partition", partitionId, "started, assignment already enabled")
-				if not currentAssignmentState.unfetchedActivePartitionIdSet[partitionId] then
-					currentAssignmentState.unfetchedActivePartitionIdSet[partitionId] = true
-				end
+			end
+			if currentAssignmentState then
+				initializeUnfetchedActivePartitionState(partitionId, endTimeMs)
 			end
 		end)
 	end
@@ -185,13 +205,6 @@ function ABTesting:UpdateStateFromAvailableCampaigns(
 			task.cancel(timer)
 			assignmentWakeUpTimersByFuturePartitionId[partitionId] = nil
 		end
-	end
-
-	-- Start requesting assignment if there are any available campaigns
-	if #availablePartitions > 0 and not currentAssignmentState then
-		startRequestingAssignment()
-	elseif #availablePartitions == 0 and currentAssignmentState then
-		stopRequestingAssignment()
 	end
 end
 
@@ -226,7 +239,7 @@ end
 	Called when the game receives GB configs and becomes aware of available
 	campaigns to enroll in.
 ]]
-function startRequestingAssignment()
+function enableAssignment()
 	if currentAssignmentState then
 		return
 	end
@@ -246,15 +259,14 @@ function startRequestingAssignment()
 		end),
 		deferredBulkAssignmentThread = nil,
 		activePartitionStateById = {},
-		unfetchedActivePartitionIdSet = {},
+		unfetchedActivePartitionStateById = {},
 	}
 
 	Utilities.GBLog("Started requesting campaign assignment")
 	
 	-- Request initial assignment
-	Utilities.GBLog("Requesting initial assignment...")
+	Utilities.GBLog("Queuing initial assignment...")
 	queueAssignment(Players:GetPlayers())
-	executeAssignmentRequest()
 end
 
 --[[
@@ -263,7 +275,7 @@ end
 	Called when the game receives an updated available campaigns snapshot
 	and becomes aware that there are no longer any available campaigns.
 ]]
-function stopRequestingAssignment()
+function disableAssignment()
 	if not currentAssignmentState then
 		return
 	end
@@ -272,6 +284,14 @@ function stopRequestingAssignment()
 	setAssignedServerPartitionId(nil)
 	for player in ABTesting.AssignedPartitionIdByPlayer do
 		setAssignedPlayerPartitionId(player, nil)
+	end
+
+	-- Clear all active partition state
+	for partitionId in currentAssignmentState.activePartitionStateById do
+		clearActivePartitionState(partitionId)
+	end
+	for partitionId in currentAssignmentState.unfetchedActivePartitionStateById do
+		clearUnfetchedActivePartitionState(partitionId)
 	end
 
 	currentAssignmentState.playerJoinListener:Disconnect()
@@ -327,7 +347,7 @@ function executeAssignmentRequest()
 
 	-- Build list of known partitions that backend shouldn't include in response
 	local knownPartitionIds: {number} = {}
-	for partitionId in knownPartitions do
+	for partitionId in assignmentState.activePartitionStateById do
 		table.insert(knownPartitionIds, partitionId)
 	end
 
@@ -360,15 +380,15 @@ function executeAssignmentRequest()
 
 	-- If no campaigns are available for assignment, disable assignment
 	if not response then
-		stopRequestingAssignment()
+		disableAssignment()
 		return
 	end
 
 	-- Cache new received partition snapshots
 	if response.partitions then
 		for _, partition in response.partitions do
-			knownPartitions[partition.id] = partition
-			assignmentState.unfetchedActivePartitionIdSet[partition.id] = nil
+			initializeActivePartitionState(partition)
+			clearUnfetchedActivePartitionState(partition.id)
 		end
 	end
 
@@ -398,55 +418,31 @@ end
 
 function setAssignedPlayerPartitionId(player: Player, partitionId: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
+	assert(partitionId == nil or currentAssignmentState.activePartitionStateById[partitionId], "Partition state has not been initialized")
+
+	Utilities.GBLog("Setting assigned partition ID for player:", player.UserId, partitionId)
 
 	local previousPartitionId = ABTesting.AssignedPartitionIdByPlayer[player]
 	if previousPartitionId == partitionId then
+		Utilities.GBLog("Skipping setting assigned partition ID for player:", player.UserId, `(unchanged {partitionId} -> {previousPartitionId})`)
 		return
 	end
 
 	-- Clear from currently assigned partition, if any
 	local previousPartitionState = previousPartitionId and currentAssignmentState.activePartitionStateById[previousPartitionId]
 	if previousPartitionState then
+		Utilities.GBLog("Clearing player from previous partition state:", player.UserId, previousPartitionId)
 		previousPartitionState.playerSet[player] = nil
-
-		-- If no players left in partition, clean up its state
-		if next(previousPartitionState.playerSet) == nil then
-			if previousPartitionState.campaignEndTimer then
-				task.cancel(previousPartitionState.campaignEndTimer)
-			end
-			currentAssignmentState.activePartitionStateById[previousPartitionId] = nil
-		end
 	end
 
 	ABTesting.AssignedPartitionIdByPlayer[player] = partitionId
 	ABTesting.OnPlayerPartitionIdChanged:Fire(player, partitionId)
 
 	if partitionId then
-		local partition = knownPartitions[partitionId]
-		ABTesting.AssignedConfigByPlayer[player] = partition.configs
-		ABTesting.OnAssignedPlayerConfigChanged:Fire(player, partition.configs)
-
-		if currentAssignmentState.activePartitionStateById[partitionId] then
-			currentAssignmentState.activePartitionStateById[partitionId].playerSet[player] = true
-
-		-- If assigning to new partition, initialize the partition's state
-		else
-			currentAssignmentState.activePartitionStateById[partitionId] = {
-				playerSet = {
-					[player] = true,
-				},
-			}
-
-			-- Start timer until partition campaign ends, to trigger reassignment
-			if partition.endsAt then
-				local secondsUntilEnd = math.max(0, partition.endsAt - DateTime.now().UnixTimestampMillis) / 1000
-				local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
-				partitionState.campaignEndTimer = task.delay(secondsUntilEnd + POST_CAMPAIGN_END_REASSIGNMENT_DELAY, function ()
-					partitionState.campaignEndTimer = nil
-					clearTerminatedPartitionAssignments({ partitionId })
-				end)
-			end
-		end
+		local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
+		ABTesting.AssignedConfigByPlayer[player] = partitionState.partition.configs
+		ABTesting.OnAssignedPlayerConfigChanged:Fire(player, partitionState.partition.configs)
+		currentAssignmentState.activePartitionStateById[partitionId].playerSet[player] = true
 
 	-- If unassigning from a partition, clear the assigned config
 	else
@@ -457,42 +453,20 @@ end
 
 function setAssignedServerPartitionId(partitionId: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
+	assert(partitionId == nil or currentAssignmentState.activePartitionStateById[partitionId], "Partition state has not been initialized")
 
 	local previousPartitionId = ABTesting.AssignedServerPartitionId
 	if previousPartitionId == partitionId then
 		return
 	end
 
-	-- Clean up previously assigned partition state
-	local previousPartitionState = previousPartitionId and currentAssignmentState.activePartitionStateById[previousPartitionId]
-	if previousPartitionState then
-		if previousPartitionState.campaignEndTimer then
-			task.cancel(previousPartitionState.campaignEndTimer)
-		end
-		currentAssignmentState.activePartitionStateById[previousPartitionId] = nil
-	end
-
 	ABTesting.AssignedServerPartitionId = partitionId
 	ABTesting.OnServerPartitionIdChanged:Fire(partitionId)
 
 	if partitionId then
-		local partition = knownPartitions[partitionId]
-		ABTesting.AssignedServerConfig = partition.configs
-		ABTesting.OnAssignedServerConfigChanged:Fire(partition.configs)
-
-		currentAssignmentState.activePartitionStateById[partitionId] = {
-			playerSet = {},
-		}
-
-		-- Start timer until partition campaign ends, to trigger reassignment
-		if partition.endsAt then
-			local secondsUntilEnd = math.max(0, partition.endsAt - DateTime.now().UnixTimestampMillis) / 1000
-			local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
-			partitionState.campaignEndTimer = task.delay(secondsUntilEnd + POST_CAMPAIGN_END_REASSIGNMENT_DELAY, function ()
-				partitionState.campaignEndTimer = nil
-				clearTerminatedPartitionAssignments({ partitionId })
-			end)
-		end
+		local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
+		ABTesting.AssignedServerConfig = partitionState.partition.configs
+		ABTesting.OnAssignedServerConfigChanged:Fire(partitionState.partition.configs)
 
 	else
 		ABTesting.AssignedServerConfig = nil
@@ -500,13 +474,58 @@ function setAssignedServerPartitionId(partitionId: number?)
 	end
 end
 
-function clearTerminatedPartitionAssignments(terminatedPartitionIds: {number})
+function getDoAvailableCampaignsRemain(excludedPartitionIdList: {number}?): boolean
+	if not currentAssignmentState then
+		return false
+	end
+
+	local excludedPartitionIdSet = {} :: {[number]: true?}
+	if excludedPartitionIdList then
+		for _, partitionId in excludedPartitionIdList do
+			excludedPartitionIdSet[partitionId] = true
+		end
+	end
+
+	for partitionId, state in currentAssignmentState.activePartitionStateById do
+		if excludedPartitionIdSet[partitionId] then
+			continue
+		end
+
+		-- Skip active partitions that may have just ended
+		if state.partition.endsAt and DateTime.now().UnixTimestampMillis >= state.partition.endsAt then
+			continue
+		end
+
+		return true
+	end
+
+	for partitionId, state in currentAssignmentState.unfetchedActivePartitionStateById do
+		if excludedPartitionIdSet[partitionId] then
+			continue
+		end
+
+		-- Skip unfetched partitions that may have just ended
+		if state.endTime and DateTime.now().UnixTimestampMillis >= state.endTime then
+			continue
+		end
+
+		return true
+	end
+
+	return false
+end
+
+--[[
+	Queues reassignment for members of the given terminated partitions,
+	if any available campaigns remain.
+]]
+function reassignTerminatedPartitionMembers(terminatedPartitionIds: {number})
 	assert(currentAssignmentState, "Assignment has not been started")
 
 	local unassignedPlayers: {Player} = {}
 	local didUnassignServer = false
 
-	-- Clear assignments to terminated partitions
+	-- Identify members in need of reassignment
 	for _, partitionId in terminatedPartitionIds do
 		local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
 		if partitionState then
@@ -523,16 +542,8 @@ function clearTerminatedPartitionAssignments(terminatedPartitionIds: {number})
 	end
 
 	-- Skip reassignment if no campaigns remain
-	local doCampaignsRemain = (lastAvailableCampaignsSnapshot and #lastAvailableCampaignsSnapshot.partitions > 0)
-		or (next(currentAssignmentState.unfetchedActivePartitionIdSet) ~= nil)
-	if not doCampaignsRemain then
+	if not getDoAvailableCampaignsRemain(terminatedPartitionIds) then
 		Utilities.GBLog("No campaigns available, skipping reassignment")
-		if didUnassignServer then
-			setAssignedServerPartitionId(nil)
-		end
-		for _, player in unassignedPlayers do
-			setAssignedPlayerPartitionId(player, nil)
-		end
 		return
 	end
 
@@ -545,6 +556,148 @@ function clearTerminatedPartitionAssignments(terminatedPartitionIds: {number})
 	if #unassignedPlayers > 0 then
 		queueAssignment(unassignedPlayers)
 	end
+end
+
+--[[
+	Initializes state for the given active partition.
+
+	This sets up tracking for when the partition should become inactive
+	and be cleaned up.
+]]
+function initializeActivePartitionState(partitionSnapshot: AvailableCampaignPartitionSnapshot)
+	assert(currentAssignmentState, "Assignment has not been started")
+
+	-- Only initialize partition state once
+	if currentAssignmentState.activePartitionStateById[partitionSnapshot.id] then
+		return
+	end
+
+	-- Initialize partition state
+	currentAssignmentState.activePartitionStateById[partitionSnapshot.id] = {
+		partition = partitionSnapshot,
+		playerSet = {},
+	}
+
+	-- Start timer until partition campaign ends, to trigger reassignment
+	if partitionSnapshot.endsAt then
+		local secondsUntilEnd = math.max(0, partitionSnapshot.endsAt - DateTime.now().UnixTimestampMillis) / 1000
+		local partitionState = currentAssignmentState.activePartitionStateById[partitionSnapshot.id]
+		partitionState.campaignEndTimer = task.delay(secondsUntilEnd + POST_CAMPAIGN_END_REASSIGNMENT_DELAY, function ()
+			partitionState.campaignEndTimer = nil
+			Utilities.GBLog("Partition", partitionSnapshot.id, "campaign ended, reassigning members & clearing...")
+			reassignTerminatedPartitionMembers({ partitionSnapshot.id })
+			clearActivePartitionState(partitionSnapshot.id, true)
+
+			-- Stop assignment if this was the last available partition remaining
+			if not getDoAvailableCampaignsRemain() then
+				Utilities.GBLog("No campaigns remain, stopping assignment")
+				disableAssignment()
+			end
+		end)
+	end
+end
+
+--[[
+	Clears active state for the specified partition.
+	
+	Called when the partition has ended or has been terminated, or when campaign assignment
+	is stopping.
+
+	**Note:** Members assigned to the partition must first be reassigned elsewhere,
+	          unless `didQueueMemberReassignment` is `true`.
+]]
+function clearActivePartitionState(partitionId: number, didQueueMemberReassignment: boolean?)
+	if not currentAssignmentState then
+		return
+	end
+
+	local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
+	if not partitionState then
+		return
+	end
+
+	-- Ensure members have been reassigned beforehand
+	if not didQueueMemberReassignment then
+		assert(next(partitionState.playerSet) == nil, "Cannot clear active partition state while players are assigned to it")
+		assert(ABTesting.AssignedServerPartitionId ~= partitionId, "Cannot clear active partition state while server is assigned to it")
+	end
+
+	if partitionState.campaignEndTimer then
+		task.cancel(partitionState.campaignEndTimer)
+	end
+
+	currentAssignmentState.activePartitionStateById[partitionId] = nil
+
+	Utilities.GBLog("Cleared active partition state:", partitionId)
+end
+
+--[[
+	Initializes state for the given active partition that hasn't been fetched yet.
+
+	This is used for partitions that were scheduled to start in the future, are now
+	active, but haven't been received from the backend yet.
+
+	If the partition ends before being received, it will be cleared automatically.
+]]
+function initializeUnfetchedActivePartitionState(partitionId: number, endTime: number?)
+	assert(currentAssignmentState, "Assignment has not been started")
+
+	-- Ensure we aren't tracking this partition yet
+	if currentAssignmentState.activePartitionStateById[partitionId] then
+		return
+	end
+	if currentAssignmentState.unfetchedActivePartitionStateById[partitionId] then
+		return
+	end
+
+	-- Initialize unfetched partition state
+	currentAssignmentState.unfetchedActivePartitionStateById[partitionId] = {
+		endTime = endTime,
+	}
+
+	-- Start timer until partition campaign ends, to forget about it
+	if endTime then
+		local secondsUntilEnd = math.max(0, endTime - DateTime.now().UnixTimestampMillis) / 1000
+		local unfetchedPartitionState = currentAssignmentState.unfetchedActivePartitionStateById[partitionId]
+		unfetchedPartitionState.campaignEndTimer = task.delay(secondsUntilEnd, function ()
+			unfetchedPartitionState.campaignEndTimer = nil
+			Utilities.GBLog("Unfetched partition", partitionId, "campaign ended, clearing")
+			clearUnfetchedActivePartitionState(partitionId)
+
+			-- Stop assignment if this was the last available partition remaining
+			if not getDoAvailableCampaignsRemain() then
+				Utilities.GBLog("No campaigns remain, stopping assignment")
+				disableAssignment()
+			end
+		end)
+	end
+
+	Utilities.GBLog("Initialized state for unfetched active partition", partitionId, "until", endTime)
+end
+
+--[[
+	Clears active state for the specified unfetched partition.
+
+	Called either when the partition has been received from the backend,
+	or when it has ended or been terminated beforehand.
+]]
+function clearUnfetchedActivePartitionState(partitionId: number)
+	if not currentAssignmentState then
+		return
+	end
+
+	local unfetchedPartitionState = currentAssignmentState.unfetchedActivePartitionStateById[partitionId]
+	if not unfetchedPartitionState then
+		return
+	end
+
+	if unfetchedPartitionState.campaignEndTimer then
+		task.cancel(unfetchedPartitionState.campaignEndTimer)
+	end
+
+	currentAssignmentState.unfetchedActivePartitionStateById[partitionId] = nil
+
+	Utilities.GBLog("Cleared unfetched active partition state:", partitionId)
 end
 
 return ABTesting
