@@ -94,11 +94,12 @@ function Updater:UpdateConfigs(newConfigs, init)
 
 	-- Trigger A/B testing campaign assignment, if applicable
 	-- (this may yield, so it's limited by a timer to avoid blocking config readiness for too long)
-	do
+	local availableCampaignsSnapshot = newConfigs.GBConfigs.ABTestingCampaigns
+	if availableCampaignsSnapshot then
 		local thread = coroutine.running()
 		local didResume = false
 		task.spawn(function ()
-			ABTesting:UpdateStateFromAvailableCampaigns(newConfigs["GBConfigs"].ABTestingCampaigns, {
+			ABTesting:UpdateStateFromAvailableCampaigns(availableCampaignsSnapshot, {
 				variables = newConfigs.configs,
 				options = newConfigs.options,
 			})
@@ -155,14 +156,22 @@ function Updater:GetBackupConfigs()
 		Utilities.GBWarn("Couldn't get configs from backup. Attempting to re-establish connection with Gamebeast...")
 	end
 
+	-- Clear any legacy A/B testing campaign data from the backup configs
+	if configs then
+		configs.GBConfigs.ABTestingCampaigns = nil
+	end
+
 	return configs
 end
 
 -- Save new configs to Roblox datastores for backup
 -- NOTE: if a server is starting up and there are a bunch of update config jobs pending, this can throttle, should probably add a flag
 function Updater:SaveConfigsToBackup(newConfigs)
+	local newBackupConfigs = Utilities.recursiveCopy(newConfigs)
+	newBackupConfigs.GBConfigs.ABTestingCampaigns = nil
+
 	Utilities.promiseReturn(1, function()
-		BackupConfigStore:SetAsync(BACKUP_STORE_KEY, newConfigs)
+		BackupConfigStore:SetAsync(BACKUP_STORE_KEY, newBackupConfigs)
 	end)
 end
 
