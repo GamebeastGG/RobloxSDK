@@ -64,7 +64,7 @@ local ClientInfoWarned = false
 	When set, this is included in each marker's `partitionId` property.
 
 	Set through `EngagementMarkers:SetServerExperimentPartitionId()` based on the
-	partition ID currently assigned to the server in an A/B testing campaign, if any.
+	partition ID currently assigned to the server in an experiment, if any.
 ]]
 local GameserverExperimentPartitionId = nil :: number?
 
@@ -72,7 +72,7 @@ local GameserverExperimentPartitionId = nil :: number?
 	When set, these are included in the `partitionId` property of the player's markers.
 
 	Set through `EngagementMarkers:SetPlayerExperimentPartitionId()` based on the
-	partition ID currently assigned to the player in an A/B testing campaign, if any.
+	partition ID currently assigned to the player in an experiment, if any.
 ]]
 local ExperimentPartitionIdByPlayer = {} :: {[Player]: number}
 
@@ -172,13 +172,10 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			["position"] = position ~= nil and EncodeVector3(position) or nil,
 			["language"] = player and LocalizationCache:GetLocaleId(player) or nil,
 			["country"] = player and LocalizationCache:GetRegionId(player) or nil,
-			-- server A/B testing partition ID if applicable
 			["partitionId"] = player
 				and ExperimentPartitionIdByPlayer[player]
 				or GameserverExperimentPartitionId,
 		},
-		-- server A/B testing partition ID if applicable
-		--["partition_id"] = partition ~= "" and partition or nil,
 	}
 
 	local function addMarker()
@@ -242,7 +239,7 @@ function EngagementMarkers:ClearSessionId(player : Player)
 end
 
 --[[
-	Sets the assigned A/B testing campaign partition ID to be included in the `partitionId`
+	Sets the assigned experiment partition ID to be included in the `partitionId`
 	property of the player's markers.
 ]]
 function EngagementMarkers:SetPlayerExperimentPartitionId(player: Player, partitionId: number?)
@@ -250,7 +247,7 @@ function EngagementMarkers:SetPlayerExperimentPartitionId(player: Player, partit
 end
 
 --[[
-	Sets the assigned A/B testing campaign partition ID to be included in the `partitionId`
+	Sets the assigned experiment partition ID to be included in the `partitionId`
 	property of the server's markers.
 ]]
 function EngagementMarkers:SetServerExperimentPartitionId(partitionId: number?)

@@ -1,5 +1,5 @@
 --!strict
-local ABTesting = {}
+local Experiments = {}
 
 -- Services
 local Players = game:GetService("Players")
@@ -18,17 +18,17 @@ type ConfigSnapshot = {
 		[string]: any,
 	},
 }
-type AvailableCampaignPartitionSnapshot = {
+type AvailableExperimentPartitionSnapshot = {
 	id: number,
 	endsAt: number?,
 	configs: ConfigSnapshot,
 }
-type AvailableCampaignsSnapshot = {
+type AvailableExperimentsSnapshot = {
 	timestampMs: number,
-	partitions: {AvailableCampaignPartitionSnapshot},
+	partitions: {AvailableExperimentPartitionSnapshot},
 	scheduled: {[string]: {number}},
 }
-type CampaignReassignmentPropagationRequest = {
+type ExperimentReassignmentPropagationRequest = {
 	playerIds: {number},
 	gameserverIds: {string},
 }
@@ -41,10 +41,10 @@ local BULK_ASSIGNMENT_SECONDS_TO_DEFER = 1
 --[[
 	How many seconds to wait before triggering reassignment for partitions that have ended.
 ]]
-local POST_CAMPAIGN_END_REASSIGNMENT_DELAY = 0
+local POST_EXPERIMENT_END_REASSIGNMENT_DELAY = 0
 
 --[[
-	Whether the application has any available campaigns to request assignments for,
+	Whether the application has any available experiments to request assignments for,
 	and has begun requesting them.
 ]]
 local currentAssignmentState: {
@@ -53,9 +53,9 @@ local currentAssignmentState: {
 	playerLeaveListener: RBXScriptConnection,
 	deferredBulkAssignmentThread: thread?,
 	activePartitionStateById: {[number]: {
-		partition: AvailableCampaignPartitionSnapshot,
+		partition: AvailableExperimentPartitionSnapshot,
 		playerSet: {[Player]: true},
-		campaignEndTimer: thread?,
+		experimentEndTimer: thread?,
 	}},
 
 	--[[
@@ -70,12 +70,12 @@ local currentAssignmentState: {
 	]]
 	unfetchedActivePartitionStateById: {[number]: {
 		endTime: number?,
-		campaignEndTimer: thread?,
+		experimentEndTimer: thread?,
 	}},
 
 }? = nil
 
-local lastAvailableCampaignsSnapshot = nil :: AvailableCampaignsSnapshot?
+local lastAvailableExperimentsSnapshot = nil :: AvailableExperimentsSnapshot?
 
 --[[
 	Map of partition IDs scheduled to start in the future, and their corresponding
@@ -85,41 +85,41 @@ local lastAvailableCampaignsSnapshot = nil :: AvailableCampaignsSnapshot?
 ]]
 local assignmentWakeUpTimersByFuturePartitionId = {} :: {[number]: thread}
 
-ABTesting.AssignedServerPartitionId = nil :: number?
-ABTesting.AssignedPartitionIdByPlayer = {} :: {[Player]: number?}
-ABTesting.OnServerPartitionIdChanged = Signal.new()
-ABTesting.OnPlayerPartitionIdChanged = Signal.new()
+Experiments.AssignedServerPartitionId = nil :: number?
+Experiments.AssignedPartitionIdByPlayer = {} :: {[Player]: number?}
+Experiments.OnServerPartitionIdChanged = Signal.new()
+Experiments.OnPlayerPartitionIdChanged = Signal.new()
 
-ABTesting.AssignedServerConfig = nil :: ConfigSnapshot?
-ABTesting.AssignedConfigByPlayer = {} :: {[Player]: ConfigSnapshot}
-ABTesting.OnAssignedServerConfigChanged = Signal.new()
-ABTesting.OnAssignedPlayerConfigChanged = Signal.new()
+Experiments.AssignedServerConfig = nil :: ConfigSnapshot?
+Experiments.AssignedConfigByPlayer = {} :: {[Player]: ConfigSnapshot}
+Experiments.OnAssignedServerConfigChanged = Signal.new()
+Experiments.OnAssignedPlayerConfigChanged = Signal.new()
 
-ABTesting.CanonicalServerConfig = nil :: ConfigSnapshot?
+Experiments.CanonicalServerConfig = nil :: ConfigSnapshot?
 
 --[[
 	Updates whether assignments are being requested or not, based on the given
-	snapshots of available campaigns received from the backend.
+	snapshots of available experiments received from the backend.
 
 	If assignment is triggered on, this will yield as it requests and waits for
 	the initial assignments to be received from the backend.
 ]]
-function ABTesting:UpdateStateFromAvailableCampaigns(
-	availableCampaignsSnapshot: AvailableCampaignsSnapshot,
+function Experiments:UpdateStateFromAvailableExperiments(
+	availableExperimentsSnapshot: AvailableExperimentsSnapshot,
 	canonicalServerConfig: ConfigSnapshot?
 )
 	if canonicalServerConfig then
-		ABTesting.CanonicalServerConfig = canonicalServerConfig
+		Experiments.CanonicalServerConfig = canonicalServerConfig
 	end
 
 	-- Ignore older snapshots (e.g. from old config change jobs, which take longer to propagate to gameservers)
-	if lastAvailableCampaignsSnapshot and (lastAvailableCampaignsSnapshot.timestampMs >= availableCampaignsSnapshot.timestampMs) then
+	if lastAvailableExperimentsSnapshot and (lastAvailableExperimentsSnapshot.timestampMs >= availableExperimentsSnapshot.timestampMs) then
 		return
 	end
-	lastAvailableCampaignsSnapshot = availableCampaignsSnapshot
+	lastAvailableExperimentsSnapshot = availableExperimentsSnapshot
 
-	-- Start requesting assignment if there are any available campaigns
-	local availablePartitions = availableCampaignsSnapshot.partitions
+	-- Start requesting assignment if there are any available experiments
+	local availablePartitions = availableExperimentsSnapshot.partitions
 	local wasAssignmentAlreadyEnabled = (currentAssignmentState ~= nil)
 	if #availablePartitions > 0 and not currentAssignmentState then
 		enableAssignment()
@@ -152,10 +152,10 @@ function ABTesting:UpdateStateFromAvailableCampaigns(
 				end
 			end
 
-			-- Clear local assignments for campaigns that have been terminated
+			-- Clear local assignments for experiments that have been terminated
 			local terminatedPartitionIds: {number} = {}
-			if ABTesting.AssignedServerPartitionId and not snapshotPartitionIdSet[ABTesting.AssignedServerPartitionId] then
-				table.insert(terminatedPartitionIds, ABTesting.AssignedServerPartitionId)
+			if Experiments.AssignedServerPartitionId and not snapshotPartitionIdSet[Experiments.AssignedServerPartitionId] then
+				table.insert(terminatedPartitionIds, Experiments.AssignedServerPartitionId)
 			end
 			for partitionId in currentAssignmentState.activePartitionStateById do
 				if not snapshotPartitionIdSet[partitionId] then
@@ -172,8 +172,8 @@ function ABTesting:UpdateStateFromAvailableCampaigns(
 		end
 	end
 
-	-- Schedule assignment wake-up timers for future campaigns
-	for partitionIdKey, timestamps in availableCampaignsSnapshot.scheduled do
+	-- Schedule assignment wake-up timers for future experiments
+	for partitionIdKey, timestamps in availableExperimentsSnapshot.scheduled do
 		local partitionId = tonumber(partitionIdKey) :: number
 		if assignmentWakeUpTimersByFuturePartitionId[partitionId] then
 			continue
@@ -200,7 +200,7 @@ function ABTesting:UpdateStateFromAvailableCampaigns(
 	end
 	for partitionId, timer in assignmentWakeUpTimersByFuturePartitionId do
 		local partitionIdKey = tostring(partitionId)
-		if not availableCampaignsSnapshot.scheduled[partitionIdKey] then
+		if not availableExperimentsSnapshot.scheduled[partitionIdKey] then
 			Utilities.GBLog("Future partition", partitionId, "terminated, cancelling timer")
 			task.cancel(timer)
 			assignmentWakeUpTimersByFuturePartitionId[partitionId] = nil
@@ -212,7 +212,7 @@ end
 	Processes a request from the backend to trigger requesting assignments for
 	specific players and servers.
 ]]
-function ABTesting:ProcessCampaignReassignmentRequest(request: CampaignReassignmentPropagationRequest)
+function Experiments:ProcessExperimentReassignmentRequest(request: ExperimentReassignmentPropagationRequest)
 	local currentGameserverId = if game.JobId == ""
 		then "00000000-0000-0000-0000-000000000000"
 		else game.JobId
@@ -234,10 +234,10 @@ function ABTesting:ProcessCampaignReassignmentRequest(request: CampaignReassignm
 end
 
 --[[
-	Starts requesting campaign assignments for players and the server.
+	Starts requesting experiment assignments for players and the server.
 
 	Called when the game receives GB configs and becomes aware of available
-	campaigns to enroll in.
+	experiments to enroll in.
 ]]
 function enableAssignment()
 	if currentAssignmentState then
@@ -248,7 +248,7 @@ function enableAssignment()
 	currentAssignmentState = {
 		playerIdsPendingAssignment = {},
 		playerJoinListener = Players.PlayerAdded:Connect(function (player)
-			if not ABTesting.AssignedServerPartitionId then
+			if not Experiments.AssignedServerPartitionId then
 				queueAssignment({ player })
 			end
 		end),
@@ -262,7 +262,7 @@ function enableAssignment()
 		unfetchedActivePartitionStateById = {},
 	}
 
-	Utilities.GBLog("Started requesting campaign assignment")
+	Utilities.GBLog("Started requesting experiment assignment")
 	
 	-- Request initial assignment
 	Utilities.GBLog("Queuing initial assignment...")
@@ -270,10 +270,10 @@ function enableAssignment()
 end
 
 --[[
-	Stops requesting campaign assignments for players and the server.
+	Stops requesting experiment assignments for players and the server.
 
-	Called when the game receives an updated available campaigns snapshot
-	and becomes aware that there are no longer any available campaigns.
+	Called when the game receives an updated available experiments snapshot
+	and becomes aware that there are no longer any available experiments.
 ]]
 function disableAssignment()
 	if not currentAssignmentState then
@@ -282,7 +282,7 @@ function disableAssignment()
 
 	-- Clear current assignments
 	setAssignedServerPartitionId(nil)
-	for player in ABTesting.AssignedPartitionIdByPlayer do
+	for player in Experiments.AssignedPartitionIdByPlayer do
 		setAssignedPlayerPartitionId(player, nil)
 	end
 
@@ -303,11 +303,11 @@ function disableAssignment()
 
 	currentAssignmentState = nil
 
-	Utilities.GBLog("Stopped requesting campaign assignment")
+	Utilities.GBLog("Stopped requesting experiment assignment")
 end
 
 --[[
-	Queues players to be assigned to campaigns in bulk.
+	Queues players to be assigned to experiments in bulk.
 ]]
 function queueAssignment(players: {Player})
 	assert(currentAssignmentState, "Assignment has not been started")
@@ -364,7 +364,7 @@ function executeAssignmentRequest()
 	-- Requeue requested players if assignment request failed
 	Utilities.GBLog("Received assignment response:", didSucceed, response)
 	if not didSucceed then
-		Utilities.GBWarn("Failed to get campaign assignment:", response)
+		Utilities.GBWarn("Failed to get experiment assignment:", response)
 
 		local players: {Player} = {}
 		for _, playerId in playerIds do
@@ -378,7 +378,7 @@ function executeAssignmentRequest()
 		return
 	end
 
-	-- If no campaigns are available for assignment, disable assignment
+	-- If no experiments are available for assignment, disable assignment
 	if not response then
 		disableAssignment()
 		return
@@ -396,7 +396,7 @@ function executeAssignmentRequest()
 		setAssignedServerPartitionId(response.gameserverPartitionId)
 
 		-- Clear previous per-player assignments, if any
-		for player in ABTesting.AssignedPartitionIdByPlayer do
+		for player in Experiments.AssignedPartitionIdByPlayer do
 			setAssignedPlayerPartitionId(player, nil)
 		end
 
@@ -422,7 +422,7 @@ function setAssignedPlayerPartitionId(player: Player, partitionId: number?)
 
 	Utilities.GBLog("Setting assigned partition ID for player:", player.UserId, partitionId)
 
-	local previousPartitionId = ABTesting.AssignedPartitionIdByPlayer[player]
+	local previousPartitionId = Experiments.AssignedPartitionIdByPlayer[player]
 	if previousPartitionId == partitionId then
 		Utilities.GBLog("Skipping setting assigned partition ID for player:", player.UserId, `(unchanged {partitionId} -> {previousPartitionId})`)
 		return
@@ -435,19 +435,19 @@ function setAssignedPlayerPartitionId(player: Player, partitionId: number?)
 		previousPartitionState.playerSet[player] = nil
 	end
 
-	ABTesting.AssignedPartitionIdByPlayer[player] = partitionId
-	ABTesting.OnPlayerPartitionIdChanged:Fire(player, partitionId)
+	Experiments.AssignedPartitionIdByPlayer[player] = partitionId
+	Experiments.OnPlayerPartitionIdChanged:Fire(player, partitionId)
 
 	if partitionId then
 		local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
-		ABTesting.AssignedConfigByPlayer[player] = partitionState.partition.configs
-		ABTesting.OnAssignedPlayerConfigChanged:Fire(player, partitionState.partition.configs)
+		Experiments.AssignedConfigByPlayer[player] = partitionState.partition.configs
+		Experiments.OnAssignedPlayerConfigChanged:Fire(player, partitionState.partition.configs)
 		currentAssignmentState.activePartitionStateById[partitionId].playerSet[player] = true
 
 	-- If unassigning from a partition, clear the assigned config
 	else
-		ABTesting.AssignedConfigByPlayer[player] = nil
-		ABTesting.OnAssignedPlayerConfigChanged:Fire(player, nil)
+		Experiments.AssignedConfigByPlayer[player] = nil
+		Experiments.OnAssignedPlayerConfigChanged:Fire(player, nil)
 	end
 end
 
@@ -455,26 +455,26 @@ function setAssignedServerPartitionId(partitionId: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
 	assert(partitionId == nil or currentAssignmentState.activePartitionStateById[partitionId], "Partition state has not been initialized")
 
-	local previousPartitionId = ABTesting.AssignedServerPartitionId
+	local previousPartitionId = Experiments.AssignedServerPartitionId
 	if previousPartitionId == partitionId then
 		return
 	end
 
-	ABTesting.AssignedServerPartitionId = partitionId
-	ABTesting.OnServerPartitionIdChanged:Fire(partitionId)
+	Experiments.AssignedServerPartitionId = partitionId
+	Experiments.OnServerPartitionIdChanged:Fire(partitionId)
 
 	if partitionId then
 		local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
-		ABTesting.AssignedServerConfig = partitionState.partition.configs
-		ABTesting.OnAssignedServerConfigChanged:Fire(partitionState.partition.configs)
+		Experiments.AssignedServerConfig = partitionState.partition.configs
+		Experiments.OnAssignedServerConfigChanged:Fire(partitionState.partition.configs)
 
 	else
-		ABTesting.AssignedServerConfig = nil
-		ABTesting.OnAssignedServerConfigChanged:Fire(nil)
+		Experiments.AssignedServerConfig = nil
+		Experiments.OnAssignedServerConfigChanged:Fire(nil)
 	end
 end
 
-function getDoAvailableCampaignsRemain(excludedPartitionIdList: {number}?): boolean
+function getDoAvailableExperimentsRemain(excludedPartitionIdList: {number}?): boolean
 	if not currentAssignmentState then
 		return false
 	end
@@ -517,7 +517,7 @@ end
 
 --[[
 	Queues reassignment for members of the given terminated partitions,
-	if any available campaigns remain.
+	if any available experiments remain.
 ]]
 function reassignTerminatedPartitionMembers(terminatedPartitionIds: {number})
 	assert(currentAssignmentState, "Assignment has not been started")
@@ -535,15 +535,15 @@ function reassignTerminatedPartitionMembers(terminatedPartitionIds: {number})
 			end
 		end
 
-		if ABTesting.AssignedServerPartitionId == partitionId then
+		if Experiments.AssignedServerPartitionId == partitionId then
 			Utilities.GBLog("Queuing reassignment for server from terminated partition:", partitionId)
 			didUnassignServer = true
 		end
 	end
 
-	-- Skip reassignment if no campaigns remain
-	if not getDoAvailableCampaignsRemain(terminatedPartitionIds) then
-		Utilities.GBLog("No campaigns available, skipping reassignment")
+	-- Skip reassignment if no experiments remain
+	if not getDoAvailableExperimentsRemain(terminatedPartitionIds) then
+		Utilities.GBLog("No experiments available, skipping reassignment")
 		return
 	end
 
@@ -564,7 +564,7 @@ end
 	This sets up tracking for when the partition should become inactive
 	and be cleaned up.
 ]]
-function initializeActivePartitionState(partitionSnapshot: AvailableCampaignPartitionSnapshot)
+function initializeActivePartitionState(partitionSnapshot: AvailableExperimentPartitionSnapshot)
 	assert(currentAssignmentState, "Assignment has not been started")
 
 	-- Only initialize partition state once
@@ -578,19 +578,19 @@ function initializeActivePartitionState(partitionSnapshot: AvailableCampaignPart
 		playerSet = {},
 	}
 
-	-- Start timer until partition campaign ends, to trigger reassignment
+	-- Start timer until partition's experiment ends, to trigger reassignment
 	if partitionSnapshot.endsAt then
 		local secondsUntilEnd = math.max(0, partitionSnapshot.endsAt - DateTime.now().UnixTimestampMillis) / 1000
 		local partitionState = currentAssignmentState.activePartitionStateById[partitionSnapshot.id]
-		partitionState.campaignEndTimer = task.delay(secondsUntilEnd + POST_CAMPAIGN_END_REASSIGNMENT_DELAY, function ()
-			partitionState.campaignEndTimer = nil
-			Utilities.GBLog("Partition", partitionSnapshot.id, "campaign ended, reassigning members & clearing...")
+		partitionState.experimentEndTimer = task.delay(secondsUntilEnd + POST_EXPERIMENT_END_REASSIGNMENT_DELAY, function ()
+			partitionState.experimentEndTimer = nil
+			Utilities.GBLog("Partition", partitionSnapshot.id, "experiment ended, reassigning members & clearing...")
 			reassignTerminatedPartitionMembers({ partitionSnapshot.id })
 			clearActivePartitionState(partitionSnapshot.id, true)
 
 			-- Stop assignment if this was the last available partition remaining
-			if not getDoAvailableCampaignsRemain() then
-				Utilities.GBLog("No campaigns remain, stopping assignment")
+			if not getDoAvailableExperimentsRemain() then
+				Utilities.GBLog("No experiments remain, stopping assignment")
 				disableAssignment()
 			end
 		end)
@@ -600,7 +600,7 @@ end
 --[[
 	Clears active state for the specified partition.
 	
-	Called when the partition has ended or has been terminated, or when campaign assignment
+	Called when the partition has ended or has been terminated, or when experiment assignment
 	is stopping.
 
 	**Note:** Members assigned to the partition must first be reassigned elsewhere,
@@ -619,11 +619,11 @@ function clearActivePartitionState(partitionId: number, didQueueMemberReassignme
 	-- Ensure members have been reassigned beforehand
 	if not didQueueMemberReassignment then
 		assert(next(partitionState.playerSet) == nil, "Cannot clear active partition state while players are assigned to it")
-		assert(ABTesting.AssignedServerPartitionId ~= partitionId, "Cannot clear active partition state while server is assigned to it")
+		assert(Experiments.AssignedServerPartitionId ~= partitionId, "Cannot clear active partition state while server is assigned to it")
 	end
 
-	if partitionState.campaignEndTimer then
-		task.cancel(partitionState.campaignEndTimer)
+	if partitionState.experimentEndTimer then
+		task.cancel(partitionState.experimentEndTimer)
 	end
 
 	currentAssignmentState.activePartitionStateById[partitionId] = nil
@@ -655,18 +655,18 @@ function initializeUnfetchedActivePartitionState(partitionId: number, endTime: n
 		endTime = endTime,
 	}
 
-	-- Start timer until partition campaign ends, to forget about it
+	-- Start timer until partition's experiment ends, to forget about it
 	if endTime then
 		local secondsUntilEnd = math.max(0, endTime - DateTime.now().UnixTimestampMillis) / 1000
 		local unfetchedPartitionState = currentAssignmentState.unfetchedActivePartitionStateById[partitionId]
-		unfetchedPartitionState.campaignEndTimer = task.delay(secondsUntilEnd, function ()
-			unfetchedPartitionState.campaignEndTimer = nil
-			Utilities.GBLog("Unfetched partition", partitionId, "campaign ended, clearing")
+		unfetchedPartitionState.experimentEndTimer = task.delay(secondsUntilEnd, function ()
+			unfetchedPartitionState.experimentEndTimer = nil
+			Utilities.GBLog("Unfetched partition", partitionId, "experiment ended, clearing")
 			clearUnfetchedActivePartitionState(partitionId)
 
 			-- Stop assignment if this was the last available partition remaining
-			if not getDoAvailableCampaignsRemain() then
-				Utilities.GBLog("No campaigns remain, stopping assignment")
+			if not getDoAvailableExperimentsRemain() then
+				Utilities.GBLog("No experiments remain, stopping assignment")
 				disableAssignment()
 			end
 		end)
@@ -691,8 +691,8 @@ function clearUnfetchedActivePartitionState(partitionId: number)
 		return
 	end
 
-	if unfetchedPartitionState.campaignEndTimer then
-		task.cancel(unfetchedPartitionState.campaignEndTimer)
+	if unfetchedPartitionState.experimentEndTimer then
+		task.cancel(unfetchedPartitionState.experimentEndTimer)
 	end
 
 	currentAssignmentState.unfetchedActivePartitionStateById[partitionId] = nil
@@ -700,4 +700,4 @@ function clearUnfetchedActivePartitionState(partitionId: number)
 	Utilities.GBLog("Cleared unfetched active partition state:", partitionId)
 end
 
-return ABTesting
+return Experiments
