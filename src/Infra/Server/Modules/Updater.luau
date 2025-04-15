@@ -216,11 +216,11 @@ function Updater:Init()
 	end
 
 	-- Update marker properties when experiments are running
-	Experiments.OnServerPartitionIdChanged:Connect(function (partitionId)
-		EngagementMarkers:SetServerExperimentPartitionId(partitionId)
+	Experiments.OnServerGroupIdChanged:Connect(function (groupId)
+		EngagementMarkers:SetServerExperimentGroupId(groupId)
 	end)
-	Experiments.OnPlayerPartitionIdChanged:Connect(function (player, partitionId)
-		EngagementMarkers:SetPlayerExperimentPartitionId(player, partitionId)
+	Experiments.OnPlayerGroupIdChanged:Connect(function (player, groupId)
+		EngagementMarkers:SetPlayerExperimentGroupId(player, groupId)
 	end)
 
 	-- Update configs for server with initialization flag

@@ -18,14 +18,14 @@ type ConfigSnapshot = {
 		[string]: any,
 	},
 }
-type AvailableExperimentPartitionSnapshot = {
+type AvailableExperimentGroupSnapshot = {
 	id: number,
 	endsAt: number?,
 	configs: ConfigSnapshot,
 }
 type AvailableExperimentsSnapshot = {
 	timestampMs: number,
-	partitions: {AvailableExperimentPartitionSnapshot},
+	groups: {AvailableExperimentGroupSnapshot},
 	scheduled: {[string]: {number}},
 }
 type ExperimentReassignmentPropagationRequest = {
@@ -39,7 +39,7 @@ type ExperimentReassignmentPropagationRequest = {
 local BULK_ASSIGNMENT_SECONDS_TO_DEFER = 1
 
 --[[
-	How many seconds to wait before triggering reassignment for partitions that have ended.
+	How many seconds to wait before triggering reassignment for groups that have ended.
 ]]
 local POST_EXPERIMENT_END_REASSIGNMENT_DELAY = 0
 
@@ -52,23 +52,23 @@ local currentAssignmentState: {
 	playerJoinListener: RBXScriptConnection,
 	playerLeaveListener: RBXScriptConnection,
 	deferredBulkAssignmentThread: thread?,
-	activePartitionStateById: {[number]: {
-		partition: AvailableExperimentPartitionSnapshot,
+	activeGroupStateById: {[number]: {
+		group: AvailableExperimentGroupSnapshot,
 		playerSet: {[Player]: true},
 		experimentEndTimer: thread?,
 	}},
 
 	--[[
-		State for partitions we know are active, but haven't received yet from snapshots or
-		assignment responses (i.e. if a future-scheduled partition has started).
+		State for groups we know are active, but haven't received yet from snapshots or
+		assignment responses (i.e. if a future-scheduled group has started).
 
-		This is initialized by `initializeUnfetchedActivePartitionState()` when a
-		scheduled partition starts.
+		This is initialized by `initializeUnfetchedActiveGroupState()` when a
+		scheduled group starts.
 
-		Once a partition is received, or if it ends before being received, it is removed
-		from this map when `clearUnfetchedActivePartitionState()` is called.
+		Once a group is received, or if it ends before being received, it is removed
+		from this map when `clearUnfetchedActiveGroupState()` is called.
 	]]
-	unfetchedActivePartitionStateById: {[number]: {
+	unfetchedActiveGroupStateById: {[number]: {
 		endTime: number?,
 		experimentEndTimer: thread?,
 	}},
@@ -78,17 +78,17 @@ local currentAssignmentState: {
 local lastAvailableExperimentsSnapshot = nil :: AvailableExperimentsSnapshot?
 
 --[[
-	Map of partition IDs scheduled to start in the future, and their corresponding
-	timer thread for triggering assignment when they start.
+	Map of experiment group IDs scheduled to start in the future, and their
+	corresponding timer thread for triggering assignment when they start.
 
 	These are created and terminated early based on received snapshots.
 ]]
-local assignmentWakeUpTimersByFuturePartitionId = {} :: {[number]: thread}
+local assignmentWakeUpTimersByFutureGroupId = {} :: {[number]: thread}
 
-Experiments.AssignedServerPartitionId = nil :: number?
-Experiments.AssignedPartitionIdByPlayer = {} :: {[Player]: number?}
-Experiments.OnServerPartitionIdChanged = Signal.new()
-Experiments.OnPlayerPartitionIdChanged = Signal.new()
+Experiments.AssignedServerGroupId = nil :: number?
+Experiments.AssignedGroupIdByPlayer = {} :: {[Player]: number?}
+Experiments.OnServerGroupIdChanged = Signal.new()
+Experiments.OnPlayerGroupIdChanged = Signal.new()
 
 Experiments.AssignedServerConfig = nil :: ConfigSnapshot?
 Experiments.AssignedConfigByPlayer = {} :: {[Player]: ConfigSnapshot}
@@ -119,63 +119,63 @@ function Experiments:UpdateStateFromAvailableExperiments(
 	lastAvailableExperimentsSnapshot = availableExperimentsSnapshot
 
 	-- Start requesting assignment if there are any available experiments
-	local availablePartitions = availableExperimentsSnapshot.partitions
+	local availableGroups = availableExperimentsSnapshot.groups
 	local wasAssignmentAlreadyEnabled = (currentAssignmentState ~= nil)
-	if #availablePartitions > 0 and not currentAssignmentState then
+	if #availableGroups > 0 and not currentAssignmentState then
 		enableAssignment()
-	elseif #availablePartitions == 0 and currentAssignmentState then
+	elseif #availableGroups == 0 and currentAssignmentState then
 		disableAssignment()
 	end
 
 	-- If assignment is enabled, apply changes from the snapshot to its state
 	if currentAssignmentState then
 
-		-- Cache received partition configs
-		local snapshotPartitionIdSet = {} :: {[number]: true}
-		for _, partition in availablePartitions do
-			snapshotPartitionIdSet[partition.id] = true
-			initializeActivePartitionState(partition)
-			clearUnfetchedActivePartitionState(partition.id)
+		-- Cache received experiment group configs
+		local snapshotGroupIdSet = {} :: {[number]: true}
+		for _, group in availableGroups do
+			snapshotGroupIdSet[group.id] = true
+			initializeActiveGroupState(group)
+			clearUnfetchedActiveGroupState(group.id)
 		end
 
 		-- If snapshot just enabled assignment, trigger and wait for initial assignment
 		if not wasAssignmentAlreadyEnabled then
 			executeAssignmentRequest()
 
-		-- If snapshot didn't just enable assignment, update partition state based on it
+		-- If snapshot didn't just enable assignment, update groups' state based on it
 		else
-			-- Clear terminated unfetched partitions
-			for partitionId in currentAssignmentState.unfetchedActivePartitionStateById do
-				if not snapshotPartitionIdSet[partitionId] then
-					Utilities.GBLog("Unfetched partition terminated:", partitionId)
-					clearUnfetchedActivePartitionState(partitionId)
+			-- Clear terminated unfetched groups
+			for groupId in currentAssignmentState.unfetchedActiveGroupStateById do
+				if not snapshotGroupIdSet[groupId] then
+					Utilities.GBLog("Unfetched experiment group terminated:", groupId)
+					clearUnfetchedActiveGroupState(groupId)
 				end
 			end
 
 			-- Clear local assignments for experiments that have been terminated
-			local terminatedPartitionIds: {number} = {}
-			if Experiments.AssignedServerPartitionId and not snapshotPartitionIdSet[Experiments.AssignedServerPartitionId] then
-				table.insert(terminatedPartitionIds, Experiments.AssignedServerPartitionId)
+			local terminatedGroupIds: {number} = {}
+			if Experiments.AssignedServerGroupId and not snapshotGroupIdSet[Experiments.AssignedServerGroupId] then
+				table.insert(terminatedGroupIds, Experiments.AssignedServerGroupId)
 			end
-			for partitionId in currentAssignmentState.activePartitionStateById do
-				if not snapshotPartitionIdSet[partitionId] then
-					table.insert(terminatedPartitionIds, partitionId)
+			for groupId in currentAssignmentState.activeGroupStateById do
+				if not snapshotGroupIdSet[groupId] then
+					table.insert(terminatedGroupIds, groupId)
 				end
 			end
-			if #terminatedPartitionIds > 0 then
-				Utilities.GBLog("Clearing terminated partitions:", terminatedPartitionIds)
-				reassignTerminatedPartitionMembers(terminatedPartitionIds)
-				for _, partitionId in terminatedPartitionIds do
-					clearActivePartitionState(partitionId, true)
+			if #terminatedGroupIds > 0 then
+				Utilities.GBLog("Clearing terminated experiment groups:", terminatedGroupIds)
+				reassignTerminatedGroupMembers(terminatedGroupIds)
+				for _, groupId in terminatedGroupIds do
+					clearActiveGroupState(groupId, true)
 				end
 			end
 		end
 	end
 
 	-- Schedule assignment wake-up timers for future experiments
-	for partitionIdKey, timestamps in availableExperimentsSnapshot.scheduled do
-		local partitionId = tonumber(partitionIdKey) :: number
-		if assignmentWakeUpTimersByFuturePartitionId[partitionId] then
+	for groupIdKey, timestamps in availableExperimentsSnapshot.scheduled do
+		local groupId = tonumber(groupIdKey) :: number
+		if assignmentWakeUpTimersByFutureGroupId[groupId] then
 			continue
 		end
 
@@ -183,27 +183,27 @@ function Experiments:UpdateStateFromAvailableExperiments(
 		local endTimeMs = timestamps[2] :: number?
 
 		local secondsUntilStart = math.max(0, startTimeMs - DateTime.now().UnixTimestampMillis) / 1000
-		Utilities.GBLog("Scheduling future partition wake-up timer:", partitionId, startTimeMs, "in", secondsUntilStart, "sec")
-		assignmentWakeUpTimersByFuturePartitionId[partitionId] = task.delay(secondsUntilStart, function ()
-			assignmentWakeUpTimersByFuturePartitionId[partitionId] = nil
+		Utilities.GBLog("Scheduling future experiment group wake-up timer:", groupId, startTimeMs, "in", secondsUntilStart, "sec")
+		assignmentWakeUpTimersByFutureGroupId[groupId] = task.delay(secondsUntilStart, function ()
+			assignmentWakeUpTimersByFutureGroupId[groupId] = nil
 
 			if not currentAssignmentState then
-				Utilities.GBLog("Future partition", partitionId, "started, enabling assignment")
+				Utilities.GBLog("Future experiment group", groupId, "started, enabling assignment")
 				enableAssignment()
 			else
-				Utilities.GBLog("Future partition", partitionId, "started, assignment already enabled")
+				Utilities.GBLog("Future experiment group", groupId, "started, assignment already enabled")
 			end
 			if currentAssignmentState then
-				initializeUnfetchedActivePartitionState(partitionId, endTimeMs)
+				initializeUnfetchedActiveGroupState(groupId, endTimeMs)
 			end
 		end)
 	end
-	for partitionId, timer in assignmentWakeUpTimersByFuturePartitionId do
-		local partitionIdKey = tostring(partitionId)
-		if not availableExperimentsSnapshot.scheduled[partitionIdKey] then
-			Utilities.GBLog("Future partition", partitionId, "terminated, cancelling timer")
+	for groupId, timer in assignmentWakeUpTimersByFutureGroupId do
+		local groupIdKey = tostring(groupId)
+		if not availableExperimentsSnapshot.scheduled[groupIdKey] then
+			Utilities.GBLog("Future experiment group", groupId, "terminated, cancelling timer")
 			task.cancel(timer)
-			assignmentWakeUpTimersByFuturePartitionId[partitionId] = nil
+			assignmentWakeUpTimersByFutureGroupId[groupId] = nil
 		end
 	end
 end
@@ -248,18 +248,18 @@ function enableAssignment()
 	currentAssignmentState = {
 		playerIdsPendingAssignment = {},
 		playerJoinListener = Players.PlayerAdded:Connect(function (player)
-			if not Experiments.AssignedServerPartitionId then
+			if not Experiments.AssignedServerGroupId then
 				queueAssignment({ player })
 			end
 		end),
 		playerLeaveListener = Players.PlayerRemoving:Connect(function (player)
 			task.defer(function ()
-				setAssignedPlayerPartitionId(player, nil)
+				setAssignedPlayerGroupId(player, nil)
 			end)
 		end),
 		deferredBulkAssignmentThread = nil,
-		activePartitionStateById = {},
-		unfetchedActivePartitionStateById = {},
+		activeGroupStateById = {},
+		unfetchedActiveGroupStateById = {},
 	}
 
 	Utilities.GBLog("Started requesting experiment assignment")
@@ -281,17 +281,17 @@ function disableAssignment()
 	end
 
 	-- Clear current assignments
-	setAssignedServerPartitionId(nil)
-	for player in Experiments.AssignedPartitionIdByPlayer do
-		setAssignedPlayerPartitionId(player, nil)
+	setAssignedServerGroupId(nil)
+	for player in Experiments.AssignedGroupIdByPlayer do
+		setAssignedPlayerGroupId(player, nil)
 	end
 
-	-- Clear all active partition state
-	for partitionId in currentAssignmentState.activePartitionStateById do
-		clearActivePartitionState(partitionId)
+	-- Clear all active group state
+	for groupId in currentAssignmentState.activeGroupStateById do
+		clearActiveGroupState(groupId)
 	end
-	for partitionId in currentAssignmentState.unfetchedActivePartitionStateById do
-		clearUnfetchedActivePartitionState(partitionId)
+	for groupId in currentAssignmentState.unfetchedActiveGroupStateById do
+		clearUnfetchedActiveGroupState(groupId)
 	end
 
 	currentAssignmentState.playerJoinListener:Disconnect()
@@ -345,16 +345,16 @@ function executeAssignmentRequest()
 	end
 	assignmentState.playerIdsPendingAssignment = {}
 
-	-- Build list of known partitions that backend shouldn't include in response
-	local knownPartitionIds: {number} = {}
-	for partitionId in assignmentState.activePartitionStateById do
-		table.insert(knownPartitionIds, partitionId)
+	-- Build list of known groups that backend shouldn't include in response
+	local knownGroupIds: {number} = {}
+	for groupId in assignmentState.activeGroupStateById do
+		table.insert(knownGroupIds, groupId)
 	end
 
 	Utilities.GBLog(`Requesting assignment (playerIds: {table.concat(playerIds, ", ")})...`)
 	local didSucceed, response = GBRequests:GBRequestAsync("v1/experiments/assignments", {
 		playerIds = playerIds,
-		knownPartitionIds = knownPartitionIds,
+		knownGroupIds = knownGroupIds,
 		allowGameserverAssignment = true,
 	})
 	if currentAssignmentState ~= assignmentState then
@@ -384,89 +384,89 @@ function executeAssignmentRequest()
 		return
 	end
 
-	-- Cache new received partition snapshots
-	if response.partitions then
-		for _, partition in response.partitions do
-			initializeActivePartitionState(partition)
-			clearUnfetchedActivePartitionState(partition.id)
+	-- Cache new received group snapshots
+	if response.groups then
+		for _, group in response.groups do
+			initializeActiveGroupState(group)
+			clearUnfetchedActiveGroupState(group.id)
 		end
 	end
 
-	if response.gameserverPartitionId then
-		setAssignedServerPartitionId(response.gameserverPartitionId)
+	if response.gameserverGroupId then
+		setAssignedServerGroupId(response.gameserverGroupId)
 
 		-- Clear previous per-player assignments, if any
-		for player in Experiments.AssignedPartitionIdByPlayer do
-			setAssignedPlayerPartitionId(player, nil)
+		for player in Experiments.AssignedGroupIdByPlayer do
+			setAssignedPlayerGroupId(player, nil)
 		end
 
-	elseif response.playerIdsByPartitionId then
-		for partitionIdString: string, partitionPlayerIds in response.playerIdsByPartitionId do
-			local partitionId = tonumber(partitionIdString) :: number
-			for _, playerId in partitionPlayerIds do
+	elseif response.playerIdsByGroupId then
+		for groupIdString: string, groupPlayerIds in response.playerIdsByGroupId do
+			local groupId = tonumber(groupIdString) :: number
+			for _, playerId in groupPlayerIds do
 				local player = Players:GetPlayerByUserId(playerId)
 				if player then
-					setAssignedPlayerPartitionId(player, partitionId)
+					setAssignedPlayerGroupId(player, groupId)
 				end
 			end
 		end
 
 		-- Clear previous per-server assignment, if any
-		setAssignedServerPartitionId(nil)
+		setAssignedServerGroupId(nil)
 	end
 end
 
-function setAssignedPlayerPartitionId(player: Player, partitionId: number?)
+function setAssignedPlayerGroupId(player: Player, groupId: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
-	assert(partitionId == nil or currentAssignmentState.activePartitionStateById[partitionId], "Partition state has not been initialized")
+	assert(groupId == nil or currentAssignmentState.activeGroupStateById[groupId], "Experiment group state has not been initialized")
 
-	Utilities.GBLog("Setting assigned partition ID for player:", player.UserId, partitionId)
+	Utilities.GBLog("Setting assigned experiment group ID for player:", player.UserId, groupId)
 
-	local previousPartitionId = Experiments.AssignedPartitionIdByPlayer[player]
-	if previousPartitionId == partitionId then
-		Utilities.GBLog("Skipping setting assigned partition ID for player:", player.UserId, `(unchanged {partitionId} -> {previousPartitionId})`)
+	local previousGroupId = Experiments.AssignedGroupIdByPlayer[player]
+	if previousGroupId == groupId then
+		Utilities.GBLog("Skipping setting assigned experiment group ID for player:", player.UserId, `(unchanged {groupId} -> {previousGroupId})`)
 		return
 	end
 
-	-- Clear from currently assigned partition, if any
-	local previousPartitionState = previousPartitionId and currentAssignmentState.activePartitionStateById[previousPartitionId]
-	if previousPartitionState then
-		Utilities.GBLog("Clearing player from previous partition state:", player.UserId, previousPartitionId)
-		previousPartitionState.playerSet[player] = nil
+	-- Clear from currently assigned group, if any
+	local previousGroupState = previousGroupId and currentAssignmentState.activeGroupStateById[previousGroupId]
+	if previousGroupState then
+		Utilities.GBLog("Clearing player from previous group state:", player.UserId, previousGroupId)
+		previousGroupState.playerSet[player] = nil
 	end
 
-	Experiments.AssignedPartitionIdByPlayer[player] = partitionId
-	Experiments.OnPlayerPartitionIdChanged:Fire(player, partitionId)
+	Experiments.AssignedGroupIdByPlayer[player] = groupId
+	Experiments.OnPlayerGroupIdChanged:Fire(player, groupId)
 
-	if partitionId then
-		local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
-		Experiments.AssignedConfigByPlayer[player] = partitionState.partition.configs
-		Experiments.OnAssignedPlayerConfigChanged:Fire(player, partitionState.partition.configs)
-		currentAssignmentState.activePartitionStateById[partitionId].playerSet[player] = true
+	if groupId then
+		local groupState = currentAssignmentState.activeGroupStateById[groupId]
+		Experiments.AssignedConfigByPlayer[player] = groupState.group.configs
+		Experiments.OnAssignedPlayerConfigChanged:Fire(player, groupState.group.configs)
+		currentAssignmentState.activeGroupStateById[groupId].playerSet[player] = true
 
-	-- If unassigning from a partition, clear the assigned config
+	-- If unassigning from a group, clear the assigned config
 	else
 		Experiments.AssignedConfigByPlayer[player] = nil
 		Experiments.OnAssignedPlayerConfigChanged:Fire(player, nil)
 	end
 end
 
-function setAssignedServerPartitionId(partitionId: number?)
+function setAssignedServerGroupId(groupId: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
-	assert(partitionId == nil or currentAssignmentState.activePartitionStateById[partitionId], "Partition state has not been initialized")
+	assert(groupId == nil or currentAssignmentState.activeGroupStateById[groupId], "Experiment group state has not been initialized")
 
-	local previousPartitionId = Experiments.AssignedServerPartitionId
-	if previousPartitionId == partitionId then
+	local previousGroupId = Experiments.AssignedServerGroupId
+	if previousGroupId == groupId then
 		return
 	end
 
-	Experiments.AssignedServerPartitionId = partitionId
-	Experiments.OnServerPartitionIdChanged:Fire(partitionId)
+	Experiments.AssignedServerGroupId = groupId
+	Experiments.OnServerGroupIdChanged:Fire(groupId)
 
-	if partitionId then
-		local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
-		Experiments.AssignedServerConfig = partitionState.partition.configs
-		Experiments.OnAssignedServerConfigChanged:Fire(partitionState.partition.configs)
+	if groupId then
+		local groupState = currentAssignmentState.activeGroupStateById[groupId]
+		Experiments.AssignedServerConfig = groupState.group.configs
+		Experiments.OnAssignedServerConfigChanged:Fire(groupState.group.configs)
 
 	else
 		Experiments.AssignedServerConfig = nil
@@ -474,37 +474,37 @@ function setAssignedServerPartitionId(partitionId: number?)
 	end
 end
 
-function getDoAvailableExperimentsRemain(excludedPartitionIdList: {number}?): boolean
+function getDoAvailableExperimentsRemain(excludedGroupIdList: {number}?): boolean
 	if not currentAssignmentState then
 		return false
 	end
 
-	local excludedPartitionIdSet = {} :: {[number]: true?}
-	if excludedPartitionIdList then
-		for _, partitionId in excludedPartitionIdList do
-			excludedPartitionIdSet[partitionId] = true
+	local excludedGroupIdSet = {} :: {[number]: true?}
+	if excludedGroupIdList then
+		for _, groupId in excludedGroupIdList do
+			excludedGroupIdSet[groupId] = true
 		end
 	end
 
-	for partitionId, state in currentAssignmentState.activePartitionStateById do
-		if excludedPartitionIdSet[partitionId] then
+	for groupId, state in currentAssignmentState.activeGroupStateById do
+		if excludedGroupIdSet[groupId] then
 			continue
 		end
 
-		-- Skip active partitions that may have just ended
-		if state.partition.endsAt and DateTime.now().UnixTimestampMillis >= state.partition.endsAt then
+		-- Skip active groups that may have just ended
+		if state.group.endsAt and DateTime.now().UnixTimestampMillis >= state.group.endsAt then
 			continue
 		end
 
 		return true
 	end
 
-	for partitionId, state in currentAssignmentState.unfetchedActivePartitionStateById do
-		if excludedPartitionIdSet[partitionId] then
+	for groupId, state in currentAssignmentState.unfetchedActiveGroupStateById do
+		if excludedGroupIdSet[groupId] then
 			continue
 		end
 
-		-- Skip unfetched partitions that may have just ended
+		-- Skip unfetched groups that may have just ended
 		if state.endTime and DateTime.now().UnixTimestampMillis >= state.endTime then
 			continue
 		end
@@ -516,33 +516,33 @@ function getDoAvailableExperimentsRemain(excludedPartitionIdList: {number}?): bo
 end
 
 --[[
-	Queues reassignment for members of the given terminated partitions,
+	Queues reassignment for members of the given terminated groups,
 	if any available experiments remain.
 ]]
-function reassignTerminatedPartitionMembers(terminatedPartitionIds: {number})
+function reassignTerminatedGroupMembers(terminatedGroupIds: {number})
 	assert(currentAssignmentState, "Assignment has not been started")
 
 	local unassignedPlayers: {Player} = {}
 	local didUnassignServer = false
 
 	-- Identify members in need of reassignment
-	for _, partitionId in terminatedPartitionIds do
-		local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
-		if partitionState then
-			for player in partitionState.playerSet do
-				Utilities.GBLog("Queuing reassignment for player from terminated partition:", partitionId, player.Name)
+	for _, groupId in terminatedGroupIds do
+		local groupState = currentAssignmentState.activeGroupStateById[groupId]
+		if groupState then
+			for player in groupState.playerSet do
+				Utilities.GBLog("Queuing reassignment for player from terminated experiment group:", groupId, player.Name)
 				table.insert(unassignedPlayers, player)
 			end
 		end
 
-		if Experiments.AssignedServerPartitionId == partitionId then
-			Utilities.GBLog("Queuing reassignment for server from terminated partition:", partitionId)
+		if Experiments.AssignedServerGroupId == groupId then
+			Utilities.GBLog("Queuing reassignment for server from terminated experiment group:", groupId)
 			didUnassignServer = true
 		end
 	end
 
 	-- Skip reassignment if no experiments remain
-	if not getDoAvailableExperimentsRemain(terminatedPartitionIds) then
+	if not getDoAvailableExperimentsRemain(terminatedGroupIds) then
 		Utilities.GBLog("No experiments available, skipping reassignment")
 		return
 	end
@@ -559,36 +559,36 @@ function reassignTerminatedPartitionMembers(terminatedPartitionIds: {number})
 end
 
 --[[
-	Initializes state for the given active partition.
+	Initializes state for the given active experiment group.
 
-	This sets up tracking for when the partition should become inactive
+	This sets up tracking for when the group should become inactive
 	and be cleaned up.
 ]]
-function initializeActivePartitionState(partitionSnapshot: AvailableExperimentPartitionSnapshot)
+function initializeActiveGroupState(groupSnapshot: AvailableExperimentGroupSnapshot)
 	assert(currentAssignmentState, "Assignment has not been started")
 
-	-- Only initialize partition state once
-	if currentAssignmentState.activePartitionStateById[partitionSnapshot.id] then
+	-- Only initialize group state once
+	if currentAssignmentState.activeGroupStateById[groupSnapshot.id] then
 		return
 	end
 
-	-- Initialize partition state
-	currentAssignmentState.activePartitionStateById[partitionSnapshot.id] = {
-		partition = partitionSnapshot,
+	-- Initialize group state
+	currentAssignmentState.activeGroupStateById[groupSnapshot.id] = {
+		group = groupSnapshot,
 		playerSet = {},
 	}
 
-	-- Start timer until partition's experiment ends, to trigger reassignment
-	if partitionSnapshot.endsAt then
-		local secondsUntilEnd = math.max(0, partitionSnapshot.endsAt - DateTime.now().UnixTimestampMillis) / 1000
-		local partitionState = currentAssignmentState.activePartitionStateById[partitionSnapshot.id]
-		partitionState.experimentEndTimer = task.delay(secondsUntilEnd + POST_EXPERIMENT_END_REASSIGNMENT_DELAY, function ()
-			partitionState.experimentEndTimer = nil
-			Utilities.GBLog("Partition", partitionSnapshot.id, "experiment ended, reassigning members & clearing...")
-			reassignTerminatedPartitionMembers({ partitionSnapshot.id })
-			clearActivePartitionState(partitionSnapshot.id, true)
+	-- Start timer until the group's experiment ends, to trigger reassignment
+	if groupSnapshot.endsAt then
+		local secondsUntilEnd = math.max(0, groupSnapshot.endsAt - DateTime.now().UnixTimestampMillis) / 1000
+		local groupState = currentAssignmentState.activeGroupStateById[groupSnapshot.id]
+		groupState.experimentEndTimer = task.delay(secondsUntilEnd + POST_EXPERIMENT_END_REASSIGNMENT_DELAY, function ()
+			groupState.experimentEndTimer = nil
+			Utilities.GBLog("Group", groupSnapshot.id, "experiment ended, reassigning members & clearing...")
+			reassignTerminatedGroupMembers({ groupSnapshot.id })
+			clearActiveGroupState(groupSnapshot.id, true)
 
-			-- Stop assignment if this was the last available partition remaining
+			-- Stop assignment if this was the last available group remaining
 			if not getDoAvailableExperimentsRemain() then
 				Utilities.GBLog("No experiments remain, stopping assignment")
 				disableAssignment()
@@ -598,73 +598,73 @@ function initializeActivePartitionState(partitionSnapshot: AvailableExperimentPa
 end
 
 --[[
-	Clears active state for the specified partition.
-	
-	Called when the partition has ended or has been terminated, or when experiment assignment
+	Clears active state for the specified experiment group.
+
+	Called when the group has ended or has been terminated, or when experiment assignment
 	is stopping.
 
-	**Note:** Members assigned to the partition must first be reassigned elsewhere,
+	**Note:** Members assigned to the group must first be reassigned elsewhere,
 	          unless `didQueueMemberReassignment` is `true`.
 ]]
-function clearActivePartitionState(partitionId: number, didQueueMemberReassignment: boolean?)
+function clearActiveGroupState(groupId: number, didQueueMemberReassignment: boolean?)
 	if not currentAssignmentState then
 		return
 	end
 
-	local partitionState = currentAssignmentState.activePartitionStateById[partitionId]
-	if not partitionState then
+	local groupState = currentAssignmentState.activeGroupStateById[groupId]
+	if not groupState then
 		return
 	end
 
 	-- Ensure members have been reassigned beforehand
 	if not didQueueMemberReassignment then
-		assert(next(partitionState.playerSet) == nil, "Cannot clear active partition state while players are assigned to it")
-		assert(Experiments.AssignedServerPartitionId ~= partitionId, "Cannot clear active partition state while server is assigned to it")
+		assert(next(groupState.playerSet) == nil, "Cannot clear active experiment group state while players are assigned to it")
+		assert(Experiments.AssignedServerGroupId ~= groupId, "Cannot clear active experiment group state while server is assigned to it")
 	end
 
-	if partitionState.experimentEndTimer then
-		task.cancel(partitionState.experimentEndTimer)
+	if groupState.experimentEndTimer then
+		task.cancel(groupState.experimentEndTimer)
 	end
 
-	currentAssignmentState.activePartitionStateById[partitionId] = nil
+	currentAssignmentState.activeGroupStateById[groupId] = nil
 
-	Utilities.GBLog("Cleared active partition state:", partitionId)
+	Utilities.GBLog("Cleared active experiment group state:", groupId)
 end
 
 --[[
-	Initializes state for the given active partition that hasn't been fetched yet.
+	Initializes state for the given active experiment group that hasn't been fetched yet.
 
-	This is used for partitions that were scheduled to start in the future, are now
+	This is used for groups that were scheduled to start in the future, are now
 	active, but haven't been received from the backend yet.
 
-	If the partition ends before being received, it will be cleared automatically.
+	If the group ends before being received, it will be cleared automatically.
 ]]
-function initializeUnfetchedActivePartitionState(partitionId: number, endTime: number?)
+function initializeUnfetchedActiveGroupState(groupId: number, endTime: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
 
-	-- Ensure we aren't tracking this partition yet
-	if currentAssignmentState.activePartitionStateById[partitionId] then
+	-- Ensure we aren't tracking this group yet
+	if currentAssignmentState.activeGroupStateById[groupId] then
 		return
 	end
-	if currentAssignmentState.unfetchedActivePartitionStateById[partitionId] then
+	if currentAssignmentState.unfetchedActiveGroupStateById[groupId] then
 		return
 	end
 
-	-- Initialize unfetched partition state
-	currentAssignmentState.unfetchedActivePartitionStateById[partitionId] = {
+	-- Initialize unfetched group state
+	currentAssignmentState.unfetchedActiveGroupStateById[groupId] = {
 		endTime = endTime,
 	}
 
-	-- Start timer until partition's experiment ends, to forget about it
+	-- Start timer until the group's experiment ends, to forget about it
 	if endTime then
 		local secondsUntilEnd = math.max(0, endTime - DateTime.now().UnixTimestampMillis) / 1000
-		local unfetchedPartitionState = currentAssignmentState.unfetchedActivePartitionStateById[partitionId]
-		unfetchedPartitionState.experimentEndTimer = task.delay(secondsUntilEnd, function ()
-			unfetchedPartitionState.experimentEndTimer = nil
-			Utilities.GBLog("Unfetched partition", partitionId, "experiment ended, clearing")
-			clearUnfetchedActivePartitionState(partitionId)
+		local unfetchedGroupState = currentAssignmentState.unfetchedActiveGroupStateById[groupId]
+		unfetchedGroupState.experimentEndTimer = task.delay(secondsUntilEnd, function ()
+			unfetchedGroupState.experimentEndTimer = nil
+			Utilities.GBLog("Unfetched group", groupId, "experiment ended, clearing")
+			clearUnfetchedActiveGroupState(groupId)
 
-			-- Stop assignment if this was the last available partition remaining
+			-- Stop assignment if this was the last available group remaining
 			if not getDoAvailableExperimentsRemain() then
 				Utilities.GBLog("No experiments remain, stopping assignment")
 				disableAssignment()
@@ -672,32 +672,32 @@ function initializeUnfetchedActivePartitionState(partitionId: number, endTime: n
 		end)
 	end
 
-	Utilities.GBLog("Initialized state for unfetched active partition", partitionId, "until", endTime)
+	Utilities.GBLog("Initialized state for unfetched active experiment group", groupId, "until", endTime)
 end
 
 --[[
-	Clears active state for the specified unfetched partition.
+	Clears active state for the specified unfetched experiment group.
 
-	Called either when the partition has been received from the backend,
+	Called either when the group has been received from the backend,
 	or when it has ended or been terminated beforehand.
 ]]
-function clearUnfetchedActivePartitionState(partitionId: number)
+function clearUnfetchedActiveGroupState(groupId: number)
 	if not currentAssignmentState then
 		return
 	end
 
-	local unfetchedPartitionState = currentAssignmentState.unfetchedActivePartitionStateById[partitionId]
-	if not unfetchedPartitionState then
+	local unfetchedGroupState = currentAssignmentState.unfetchedActiveGroupStateById[groupId]
+	if not unfetchedGroupState then
 		return
 	end
 
-	if unfetchedPartitionState.experimentEndTimer then
-		task.cancel(unfetchedPartitionState.experimentEndTimer)
+	if unfetchedGroupState.experimentEndTimer then
+		task.cancel(unfetchedGroupState.experimentEndTimer)
 	end
 
-	currentAssignmentState.unfetchedActivePartitionStateById[partitionId] = nil
+	currentAssignmentState.unfetchedActiveGroupStateById[groupId] = nil
 
-	Utilities.GBLog("Cleared unfetched active partition state:", partitionId)
+	Utilities.GBLog("Cleared unfetched active experiment group state:", groupId)
 end
 
 return Experiments

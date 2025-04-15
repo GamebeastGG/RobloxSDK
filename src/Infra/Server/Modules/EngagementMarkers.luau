@@ -61,20 +61,20 @@ local LastEventReportTime = 0
 local ClientInfoWarned = false
 
 --[[
-	When set, this is included in each marker's `partitionId` property.
+	When set, this is included in each marker's `experimentGroupId` property.
 
-	Set through `EngagementMarkers:SetServerExperimentPartitionId()` based on the
-	partition ID currently assigned to the server in an experiment, if any.
+	Set through `EngagementMarkers:SetServerExperimentGroupId()` based on the
+	group ID currently assigned to the server in an experiment, if any.
 ]]
-local GameserverExperimentPartitionId = nil :: number?
+local GameserverExperimentGroupId = nil :: number?
 
 --[[
-	When set, these are included in the `partitionId` property of the player's markers.
+	When set, these are included in the `experimentGroupId` property of the player's markers.
 
-	Set through `EngagementMarkers:SetPlayerExperimentPartitionId()` based on the
-	partition ID currently assigned to the player in an experiment, if any.
+	Set through `EngagementMarkers:SetPlayerExperimentGroupId()` based on the
+	group ID currently assigned to the player in an experiment, if any.
 ]]
-local ExperimentPartitionIdByPlayer = {} :: {[Player]: number}
+local ExperimentGroupIdByPlayer = {} :: {[Player]: number}
 
 
 --= Public Variables =--
@@ -172,9 +172,9 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			["position"] = position ~= nil and EncodeVector3(position) or nil,
 			["language"] = player and LocalizationCache:GetLocaleId(player) or nil,
 			["country"] = player and LocalizationCache:GetRegionId(player) or nil,
-			["partitionId"] = player
-				and ExperimentPartitionIdByPlayer[player]
-				or GameserverExperimentPartitionId,
+			["experimentGroupId"] = player
+				and ExperimentGroupIdByPlayer[player]
+				or GameserverExperimentGroupId,
 		},
 	}
 
@@ -239,19 +239,19 @@ function EngagementMarkers:ClearSessionId(player : Player)
 end
 
 --[[
-	Sets the assigned experiment partition ID to be included in the `partitionId`
+	Sets the assigned experiment group ID to be included in the `experimentGroupId`
 	property of the player's markers.
 ]]
-function EngagementMarkers:SetPlayerExperimentPartitionId(player: Player, partitionId: number?)
-	ExperimentPartitionIdByPlayer[player] = partitionId
+function EngagementMarkers:SetPlayerExperimentGroupId(player: Player, groupId: number?)
+	ExperimentGroupIdByPlayer[player] = groupId
 end
 
 --[[
-	Sets the assigned experiment partition ID to be included in the `partitionId`
+	Sets the assigned experiment group ID to be included in the `experimentGroupId`
 	property of the server's markers.
 ]]
-function EngagementMarkers:SetServerExperimentPartitionId(partitionId: number?)
-	GameserverExperimentPartitionId = partitionId
+function EngagementMarkers:SetServerExperimentGroupId(groupId: number?)
+	GameserverExperimentGroupId = groupId
 end
 
 --= Initializers =--
