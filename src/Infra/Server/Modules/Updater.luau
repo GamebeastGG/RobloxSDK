@@ -89,7 +89,7 @@ function Updater:UpdateConfigs(newConfigs, init)
 
 	-- Trigger experiment assignment, if applicable
 	-- (this may yield, so it's limited by a timer to avoid blocking config readiness for too long)
-	local availableExperimentsSnapshot = newConfigs.GBConfigs.ABTestingCampaigns
+	local availableExperimentsSnapshot = newConfigs.GBConfigs.Experiments
 	if availableExperimentsSnapshot then
 		local thread = coroutine.running()
 		local didResume = false
@@ -153,7 +153,7 @@ function Updater:GetBackupConfigs()
 
 	-- Clear any experiment snapshot data from the backup configs
 	if configs then
-		configs.GBConfigs.ABTestingCampaigns = nil
+		configs.GBConfigs.Experiments = nil
 	end
 
 	return configs
@@ -163,7 +163,7 @@ end
 -- NOTE: if a server is starting up and there are a bunch of update config jobs pending, this can throttle, should probably add a flag
 function Updater:SaveConfigsToBackup(newConfigs)
 	local newBackupConfigs = Utilities.recursiveCopy(newConfigs)
-	newBackupConfigs.GBConfigs.ABTestingCampaigns = nil
+	newBackupConfigs.GBConfigs.Experiments = nil
 
 	Utilities.promiseReturn(1, function()
 		BackupConfigStore:SetAsync(BACKUP_STORE_KEY, newBackupConfigs)
