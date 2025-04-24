@@ -144,6 +144,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 	
 
 	local entry = {
+		["markerId"] = HttpService:GenerateGUID(false),
 		["timestamp"] = metaData.timestampOverride or DateTime.now().UnixTimestampMillis,
 		["type"] = markerType,
 		["userId"] = player and player.UserId, 
