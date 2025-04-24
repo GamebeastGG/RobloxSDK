@@ -117,8 +117,8 @@ local function AddModuleFolder(modulesFolder : Instance)
 	end
 
 	modulesFolder.Modules.DescendantAdded:Connect(moduleAddedLate)
-	modulesFolder.Public.DescendantAdded:Connect(function(...)
-		moduleAddedLate(..., true)
+	modulesFolder.Public.DescendantAdded:Connect(function(module : ModuleScript)
+		moduleAddedLate(module, true)
 	end)
 end
 
