@@ -50,6 +50,14 @@ function Configs:Observe(targetConfig : string | { string }, callback : (newValu
     return self:OnChanged(targetConfig, callback) -- OnChanged does not fire when OnReady fires.
 end
 
+function Configs:ObserveForPlayer(player: Player, targetConfig: string | {string}, callback: (newValue: any, oldValue: any) -> ()): RBXScriptConnection
+    task.spawn(function()
+        callback(self:GetForPlayer(player, targetConfig), nil)
+    end)
+
+    return self:OnChangedForPlayer(player, targetConfig, callback)
+end
+
 function Configs:OnChanged(targetConfig : string | {string}, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
     return InternalConfigs:OnChanged(nil, targetConfig, callback)
 end
