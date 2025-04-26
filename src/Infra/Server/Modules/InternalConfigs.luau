@@ -167,7 +167,19 @@ function InternalConfigs:OnChanged(player: Player?, targetConfig : string | {str
 
 	-- Establish bindable connection
 	return BatchConfigUpdatedSignal:Connect(function(updatedPlayer: Player?, changes : {{path : {string}, newValue : any, oldValue : any}}, oldConfigs : any)
-		if updatedPlayer ~= player then
+		local isServerChange = (updatedPlayer == nil)
+
+		-- If subscribed to server changes, ignore player-specific changes
+		if player == nil and not isServerChange then
+			return
+		end
+
+		-- If subscribed to player changes, only fire for server if no player-specific config is set
+		if player and isServerChange then
+			if ActiveConfigs.DevConfigsByPlayer[player] then
+				return
+			end
+		elseif player and updatedPlayer ~= player then
 			return
 		end
 
