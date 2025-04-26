@@ -76,7 +76,9 @@ local function IsPathPrivate(path : {string}, privatePaths: {{string}}) : boolea
 
 		local match = true
 		for index, pathSegment in ipairs(path) do -- a, d
-			if pathSegment ~= privacyPath[index] then
+			if privacyPath[index] == nil then
+				return true
+			elseif pathSegment ~= privacyPath[index] then
 				match = false
 				break
 			end
