@@ -42,6 +42,14 @@ function Configs:GetForPlayer(player: Player, path: string | {string})
     return InternalConfigs:Get(player, path)
 end
 
+function Configs:Observe(targetConfig : string | { string }, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
+    task.spawn(function() -- Get will yeild until ready, so this works as initial callback + wait for ready
+        callback(self:Get(targetConfig), nil)
+    end)
+
+    return self:OnChanged(targetConfig, callback) -- OnChanged does not fire when OnReady fires.
+end
+
 function Configs:OnChanged(targetConfig : string | {string}, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
     return InternalConfigs:OnChanged(nil, targetConfig, callback)
 end

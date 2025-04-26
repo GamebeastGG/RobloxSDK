@@ -10,6 +10,7 @@
 --]]
 
 --= Root =--
+
 local Gamebeast = { }
 
 --= Roblox Services =--
@@ -117,7 +118,9 @@ local function AddModuleFolder(modulesFolder : Instance)
 	end
 
 	modulesFolder.Modules.DescendantAdded:Connect(moduleAddedLate)
-	modulesFolder.Public.DescendantAdded:Connect(moduleAddedLate, true)
+	modulesFolder.Public.DescendantAdded:Connect(function(module : ModuleScript)
+		moduleAddedLate(module, true)
+	end)
 end
 
 local function FindModule(moduleCache : {[string] : ModuleData | PublicModuleData}, name : string, timeout : number?)
@@ -229,7 +232,6 @@ function Gamebeast:Setup(setupConfig : ServerSetupConfig?)
 	dataCacheModule:Set("Key", setupConfig.key)
 	dataCacheModule:Set("Settings", sdkSettings)
 end
-
 
 --= Initializers =--
 do
