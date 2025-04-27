@@ -152,6 +152,28 @@ utilities.publishMessage = function(channel, message)
 	end)
 end
 
+--- Returns an array of all values found in the given table, regardless of key type.
+function utilities.getTableValues<K, V>(t: {[K]: V}): {V}
+	local values: {V} = {}
+	for _, value in t do
+		table.insert(values, value)
+	end
+	return values
+end
+
+--- Returns the value found when traversing `root` upon reaching the given `path`.
+function utilities.getValueAtPath(root: any, path: {string}): any
+	local value = root
+	for _, pathSegment in path do
+		if typeof(value) ~= "table" then
+			value = nil
+			break
+		end
+		value = value[pathSegment]
+	end
+	return value
+end
+
 -- Wrapper for player added that ensures players that joined before the signal was attached get passed through the callback.
 function utilities:OnPlayerAdded(callback : (player : Player) -> ())
 	for _, player in pairs(game.Players:GetPlayers()) do

@@ -93,18 +93,18 @@ local function IsPathPrivate(path : {string}, privatePaths: {{string}}) : boolea
 end
 
 local function FilterConfigForClient(path : {string}, config : {[string] : any}, privacyConfig: {{string}}) : {[string] : any}
-	if type(config) ~= "table" then
-		return config
-	end
-
-	local configCopy = Utilities.recursiveCopy(config)
+	local configCopy = if typeof(config) == "table"
+		then Utilities.recursiveCopy(config)
+		else config
 
 	-- Determine if the path is a match for any privacy paths
 	local targetPaths = {}
 	for _, privacyPath in privacyConfig do -- a, d, e
 		local match = true
 		for index, pathSegment in ipairs(path) do -- a, d
-			if pathSegment ~= privacyPath[index] then
+			if privacyPath[index] == nil then
+				break
+			elseif pathSegment ~= privacyPath[index] then
 				match = false
 				break
 			end
@@ -122,6 +122,13 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 
 	-- Remove any paths that are marked as private
 	for _, targetPath in targetPaths do
+
+		-- Clear root value if path points to it
+		if #targetPath == 0 then
+			configCopy = nil
+			break
+		end
+
 		local target = configCopy
 		for index, pathSegment in targetPath do
 			if index == #targetPath then
@@ -257,6 +264,44 @@ function InternalConfigs:ApplyInternalConfigs(newGBConfigs)
 	--EventDataUpdatedRemote:FireAllClients(newConfigs["GBEventData"])
 end
 
+local function addRootmostPathToSet(rootmostPathSet: {[string]: {string}?}, newPath: {string}): ()
+	if #newPath == 0 then
+		table.clear(rootmostPathSet)
+	end
+
+	-- Build hash key from path, escaping segment delimiter in case user-defined path contains it
+	local escapedNewPath: {string} = table.create(#newPath)
+	for _, pathSegment in newPath do
+		table.insert(escapedNewPath, (pathSegment:gsub("\\", "\\\\"):gsub("%.", "\\.")))
+	end
+	local newPathKey = table.concat(escapedNewPath, ".")
+
+	-- If already exactly in set, skip adding
+	if rootmostPathSet[newPathKey] then
+		return
+	end
+
+	-- Check if existing paths cover new path
+	for existingPathKey in rootmostPathSet do
+		if string.sub(newPathKey, 1, #existingPathKey) == existingPathKey then
+			
+			-- If new one is higher-level than existing, replace it
+			if #newPathKey < #existingPathKey then
+				rootmostPathSet[existingPathKey] = nil
+				rootmostPathSet[newPathKey] = newPath
+				return
+
+			-- If existing is higher-level than new, skip adding
+			else
+				return
+			end
+		end
+	end
+
+	-- If no existing paths cover new path, add it to the set
+	rootmostPathSet[newPathKey] = newPath
+end
+
 function InternalConfigs:ApplyConfigs(player: Player?, newConfigs: {[string]: any}?, privacyConfig : { {string} }?, init : boolean?)
 	if not player then
 		assert(newConfigs, "Server configs cannot be cleared")
@@ -267,6 +312,9 @@ function InternalConfigs:ApplyConfigs(player: Player?, newConfigs: {[string]: an
 		and ActiveConfigs.DevConfigsByPlayer[player]
 		or ActiveConfigs.DevConfigs
 	)
+	local oldPrivatePaths = player
+		and CurrentClientPrivacyByPlayer[player]
+		or CurrentClientPrivacy
 
 	if player then
 		CurrentClientPrivacyByPlayer[player] = privacyConfig
@@ -315,10 +363,66 @@ function InternalConfigs:ApplyConfigs(player: Player?, newConfigs: {[string]: an
 
 		if #changedBatch > 0 then
 			BatchConfigUpdatedSignal:Fire(player, changedBatch, oldConfigs)
+		end
 
+		-- When public paths become private, queue scrubbing their rootmost value
+		local newlyPrivatePathsToScrubSet: {[string]: {string}?} = {}
+		for _, newPrivatePath in privacyConfig do
+			local previousValueAtNewlyPrivatePath = Utilities.getValueAtPath(oldConfigs, newPrivatePath)
+			local wasPreviouslyPresent = (previousValueAtNewlyPrivatePath ~= nil)
+			if wasPreviouslyPresent and not IsPathPrivate(newPrivatePath, oldPrivatePaths) then
+				addRootmostPathToSet(newlyPrivatePathsToScrubSet, newPrivatePath)
+			end
+		end
+		local newlyPrivatePathsToScrub = Utilities.getTableValues(newlyPrivatePathsToScrubSet)
+
+		-- When private paths become public, queue repopulating their rootmost value
+		local newlyPublicPathsToRepopulateSet: {[string]: {string}?} = {}
+		for _, oldPrivatePath in oldPrivatePaths do
+			if not IsPathPrivate(oldPrivatePath, privacyConfig) then
+				addRootmostPathToSet(newlyPublicPathsToRepopulateSet, oldPrivatePath)
+			end
+		end
+		local newlyPublicPathsToRepopulate = Utilities.getTableValues(newlyPublicPathsToRepopulateSet)
+
+		-- Skip redundant changes for paths being scrubbed or repopulated
+		local filteredChangeBatch: typeof(changedBatch) = table.create(#changedBatch)
+		for _, change in changedBatch do
+			local willBeReplaced = IsPathPrivate(change.path, newlyPrivatePathsToScrub)
+				or IsPathPrivate(change.path, newlyPublicPathsToRepopulate)
+			if not willBeReplaced then
+				table.insert(filteredChangeBatch, change)
+			end
+		end
+		changedBatch = filteredChangeBatch
+
+		-- Add changes for rootmost paths being scrubbed or repopulated
+		for _, newlyPrivatePath in newlyPrivatePathsToScrubSet do
+			table.insert(changedBatch, {
+				path = newlyPrivatePath,
+				newValue = nil,
+				isPrivacyTransition = true,
+			})
+		end
+		for _, newlyPublicPath in newlyPublicPathsToRepopulateSet do
+			local valueAtNewlyPublicPath = Utilities.getValueAtPath(newConfigs, newlyPublicPath)
+
+			-- If not present in new configs, skip redundant send
+			if valueAtNewlyPublicPath == nil then
+				continue
+			end
+
+			table.insert(changedBatch, {
+				path = newlyPublicPath,
+				newValue = valueAtNewlyPublicPath,
+				isPrivacyTransition = true,
+			})
+		end
+
+		if #changedBatch > 0 then
 			local filteredChanges = {}
 			for _, change in changedBatch do
-				if not IsPathPrivate(change.path, privacyConfig) then
+				if change.isPrivacyTransition or not IsPathPrivate(change.path, privacyConfig) then
 					change.newValue = FilterConfigForClient(change.path, change.newValue, privacyConfig)
 					table.insert(filteredChanges, change)
 				end
