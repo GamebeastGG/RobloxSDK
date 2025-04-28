@@ -13,6 +13,7 @@
 local ClientInfoHandler = { }
 
 --= Roblox Services =--
+local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local VRService = game:GetService("VRService")
@@ -26,10 +27,13 @@ local GetRemote = shared.GBMod("GetRemote")
 --= Object References =--
 
 local ClientInfoRemote = GetRemote("Event", "ClientInfoChanged")
+local ClientProductPriceRemote = GetRemote("Function", "GetProductPrice")
 
 --= Constants =--
 
 --= Variables =--
+
+local ProductInfoCache = {} :: {[number] : {PriceInRobux : number}}
 
 --= Public Variables =--
 
@@ -54,8 +58,27 @@ end
 --= Initializers =--
 function ClientInfoHandler:Init()
     ClientInfoRemote:FireServer({
-        device = self:GetDeviceType()
+        device = self:GetDeviceType(),
     })
+
+    -- Geographic pricing
+    ClientProductPriceRemote.OnClientInvoke = function(productId : number, productType : Enum.InfoType) : number
+        if ProductInfoCache[productId] then
+            return ProductInfoCache[productId]
+        end
+
+        local success, price = pcall(function()
+            return MarketplaceService:GetProductInfo(productId, productType)
+        end)
+
+        if success then
+            ProductInfoCache[productId] = price
+            return price.PriceInRobux
+        else
+            warn("Failed to get product price: " .. tostring(price))
+            return nil
+        end
+    end
 end
 
 --= Return Module =--
