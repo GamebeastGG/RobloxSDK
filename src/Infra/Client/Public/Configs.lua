@@ -38,11 +38,17 @@ function Configs:Get(path : string | { string })
 end
 
 function Configs:Observe(targetConfig : string | { string }, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
+    local onChangedSignal = self:OnChanged(targetConfig, callback) -- OnChanged does not fire when OnReady fires.
+    
     task.spawn(function() -- Get will yeild until ready, so this works as initial callback + wait for ready
-        callback(self:Get(targetConfig), nil)
+        local data = self:Get(targetConfig)
+
+        if onChangedSignal.Connected then
+            callback(data, nil) -- Initial callback with nil oldValue
+        end
     end)
 
-    return self:OnChanged(targetConfig, callback) -- OnChanged does not fire when OnReady fires.
+    return onChangedSignal
 end
 
 function Configs:OnChanged(targetConfig : string | {string}, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
