@@ -57,11 +57,16 @@ function Configs:Observe(targetConfig : string | { string }, callback : (newValu
 end
 
 function Configs:ObserveForPlayer(player: Player, targetConfig: string | {string}, callback: (newValue: any, oldValue: any) -> ()): RBXScriptConnection
+    local onChangedSignal = self:OnChangedForPlayer(player, targetConfig, callback)
+
     task.spawn(function()
-        callback(self:GetForPlayer(player, targetConfig), nil)
+        local data = self:GetForPlayer(player, targetConfig)
+        if onChangedSignal.Connected then
+            callback(data, nil)
+        end
     end)
 
-    return self:OnChangedForPlayer(player, targetConfig, callback)
+    return onChangedSignal
 end
 
 function Configs:OnChanged(targetConfig : string | {string}, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
