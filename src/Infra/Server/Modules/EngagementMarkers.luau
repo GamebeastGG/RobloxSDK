@@ -60,6 +60,22 @@ local SessionIds = {}
 local LastEventReportTime = 0
 local ClientInfoWarned = false
 
+--[[
+	When set, this is included in each marker's `experimentGroupId` property.
+
+	Set through `EngagementMarkers:SetServerExperimentGroupId()` based on the
+	group ID currently assigned to the server in an experiment, if any.
+]]
+local GameserverExperimentGroupId = nil :: number?
+
+--[[
+	When set, these are included in the `experimentGroupId` property of the player's markers.
+
+	Set through `EngagementMarkers:SetPlayerExperimentGroupId()` based on the
+	group ID currently assigned to the player in an experiment, if any.
+]]
+local ExperimentGroupIdByPlayer = {} :: {[Player]: number}
+
 
 --= Public Variables =--
 
@@ -157,11 +173,10 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			["position"] = position ~= nil and EncodeVector3(position) or nil,
 			["language"] = player and LocalizationCache:GetLocaleId(player) or nil,
 			["country"] = player and LocalizationCache:GetRegionId(player) or nil,
-			-- server A/B testing partition ID if applicable
-			--["partition_id"] = partition ~= "" and partition or nil,
+			["experimentGroupId"] = player
+				and ExperimentGroupIdByPlayer[player]
+				or GameserverExperimentGroupId,
 		},
-		-- server A/B testing partition ID if applicable
-		--["partition_id"] = partition ~= "" and partition or nil,
 	}
 
 	local function addMarker()
@@ -222,6 +237,22 @@ end
 
 function EngagementMarkers:ClearSessionId(player : Player)
 	SessionIds[player] = nil
+end
+
+--[[
+	Sets the assigned experiment group ID to be included in the `experimentGroupId`
+	property of the player's markers.
+]]
+function EngagementMarkers:SetPlayerExperimentGroupId(player: Player, groupId: number?)
+	ExperimentGroupIdByPlayer[player] = groupId
+end
+
+--[[
+	Sets the assigned experiment group ID to be included in the `experimentGroupId`
+	property of the server's markers.
+]]
+function EngagementMarkers:SetServerExperimentGroupId(groupId: number?)
+	GameserverExperimentGroupId = groupId
 end
 
 --= Initializers =--

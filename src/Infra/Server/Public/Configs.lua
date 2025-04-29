@@ -35,7 +35,11 @@ local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfi
 --= API Functions =--
 
 function Configs:Get(path : string | { string })
-    return InternalConfigs:Get(path)
+    return InternalConfigs:Get(nil, path)
+end
+
+function Configs:GetForPlayer(player: Player, path: string | {string})
+    return InternalConfigs:Get(player, path)
 end
 
 function Configs:Observe(targetConfig : string | { string }, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
@@ -52,8 +56,25 @@ function Configs:Observe(targetConfig : string | { string }, callback : (newValu
     return onChangedSignal
 end
 
+function Configs:ObserveForPlayer(player: Player, targetConfig: string | {string}, callback: (newValue: any, oldValue: any) -> ()): RBXScriptConnection
+    local onChangedSignal = self:OnChangedForPlayer(player, targetConfig, callback)
+
+    task.spawn(function()
+        local data = self:GetForPlayer(player, targetConfig)
+        if onChangedSignal.Connected then
+            callback(data, nil)
+        end
+    end)
+
+    return onChangedSignal
+end
+
 function Configs:OnChanged(targetConfig : string | {string}, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
-    return InternalConfigs:OnChanged(targetConfig, callback)
+    return InternalConfigs:OnChanged(nil, targetConfig, callback)
+end
+
+function Configs:OnChangedForPlayer(player: Player, targetConfig: string | {string}, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
+    return InternalConfigs:OnChanged(player, targetConfig, callback)
 end
 
 function Configs:OnReady(callback : (configs : any) -> ()) : RBXScriptSignal

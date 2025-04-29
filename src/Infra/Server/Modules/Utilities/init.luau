@@ -23,6 +23,12 @@ utilities.GBWarn = function(message)
 	end
 end
 
+utilities.GBLog = function (...)
+	if DataCache:Get("Settings").sdkDebugEnabled then
+		print("GamebeastSDK:", ...)
+	end
+end
+
 utilities.resolvePlayerObject = function(playerQuery : Player | number)
 	if typeof(playerQuery) == "number" then
 		return game.Players:GetPlayerByUserId(playerQuery)
@@ -170,6 +176,28 @@ utilities.publishMessage = function(channel, message)
 	if not success then
 		utilities.GBWarn(`Failed to publish message to channel: {channel} (Total count: {MessagingServiceDebugCache[channel]}) with error: {errorMessage}`)
 	end
+end
+
+--- Returns an array of all values found in the given table, regardless of key type.
+function utilities.getTableValues<K, V>(t: {[K]: V}): {V}
+	local values: {V} = {}
+	for _, value in t do
+		table.insert(values, value)
+	end
+	return values
+end
+
+--- Returns the value found when traversing `root` upon reaching the given `path`.
+function utilities.getValueAtPath(root: any, path: {string}): any
+	local value = root
+	for _, pathSegment in path do
+		if typeof(value) ~= "table" then
+			value = nil
+			break
+		end
+		value = value[pathSegment]
+	end
+	return value
 end
 
 -- Wrapper for player added that ensures players that joined before the signal was attached get passed through the callback.

@@ -110,16 +110,18 @@ function Signal:Wait() : ...any
 end
 
 function Signal:Fire(...)
+    local argCount = select("#", ...)
     local lastLength = #self._callbacks
     local currentIndex = 1
     while currentIndex <= #self._callbacks do
         local callbackData = self._callbacks[currentIndex]
-        local dataToSend = {}
-        for _, data in ipairs({...}) do
-            table.insert(dataToSend, DeepCopy(data))
+        local dataToSend = table.create(argCount)
+        for argIndex = 1, argCount do
+            local arg = select(argIndex, ...)
+            dataToSend[argIndex] = DeepCopy(arg)
         end
 
-        task.spawn(callbackData.callback, unpack(dataToSend))
+        task.spawn(callbackData.callback, table.unpack(dataToSend, 1, argCount))
         if callbackData.isOnce then
             callbackData.connection:Disconnect()
         end
