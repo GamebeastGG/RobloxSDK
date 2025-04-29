@@ -6,6 +6,8 @@ local messagingService = game:GetService("MessagingService")
 
 local DataCache = shared.GBMod("DataCache")
 
+local MessagingServiceDebugCache = {} :: {[string] : number}
+
 local utilities = {}
 
 -- Central function for warning messages across SDK. Indicates Gamebeast as warning source and allows for output settings.
@@ -63,6 +65,25 @@ utilities.promiseReturn = function(maxRetries, callback, retries)
 		end
 
 		return utilities.promiseReturn(maxRetries, callback, retries)
+	end
+end
+
+function utilities:PCallRetry(retryCount : number, callback : () -> (), _count : number?) : (boolean, any?)
+	if not _count then
+		_count = 0
+	end
+
+	local success, result = pcall(callback)
+
+	if success then
+		return true, result
+	else
+		if _count < retryCount then
+			task.wait(0.1)
+			return self:PCallRetry(retryCount, callback, _count + 1)
+		else
+			return false, result
+		end
 	end
 end
 
@@ -147,9 +168,14 @@ end
 
 -- Publish message with messaging service with promise wrapper. All MessageService messages go through here for potential usage monitoring.
 utilities.publishMessage = function(channel, message)
-	utilities.promiseReturn(1, function()
+	local success, errorMessage = utilities:PCallRetry(1, function()
+		MessagingServiceDebugCache[channel] = (MessagingServiceDebugCache[channel] or 0) + 1
 		messagingService:PublishAsync(channel, message)
 	end)
+
+	if not success then
+		utilities.GBWarn(`Failed to publish message to channel: {channel} (Total count: {MessagingServiceDebugCache[channel]}) with error: {errorMessage}`)
+	end
 end
 
 --- Returns an array of all values found in the given table, regardless of key type.

@@ -28,6 +28,7 @@ local SignalTimeout = shared.GBMod("SignalTimeout") ---@module SignalTimeout
 --= Object References =--
 
 local ClientInfoRemote = GetRemote("Event", "ClientInfoChanged")
+local ClientProductPriceRemote = GetRemote("Function", "GetProductPrice")
 local ClientInfoResolvedSignal = Signal.new()
 
 --= Constants =--
@@ -75,6 +76,35 @@ function ServerClientInfoHandler:OnClientInfoResolved(player : Player, timeoutSe
             callback(false, table.clone(info))
         end
     end)
+end
+
+-- Good way to tell if the client SDK is even initialized.
+function ServerClientInfoHandler:IsClientInfoResolved(player : Player | number) : boolean
+    if typeof(player) == "number" then
+        player = Players:GetPlayerByUserId(player)
+    end
+
+    return ClientInfoCache[player] ~= nil
+end
+
+function ServerClientInfoHandler:GetProductPriceForPlayer(player : Player | number, productId : number, productType : Enum.InfoType) : number?
+    if typeof(player) == "number" then
+        player = Players:GetPlayerByUserId(player)
+    end
+
+    if not self:IsClientInfoResolved(player) then
+        return nil
+    end
+
+    local success, result = pcall(function()
+        return ClientProductPriceRemote:InvokeClient(player, productId, productType)
+    end)
+
+    if not success then
+        return nil
+    else
+        return result
+    end
 end
 
 --= Initializers =--

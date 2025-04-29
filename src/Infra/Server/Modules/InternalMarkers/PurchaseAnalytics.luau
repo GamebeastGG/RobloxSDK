@@ -21,6 +21,7 @@ local Players = game:GetService("Players")
 
 local Utilities = shared.GBMod("Utilities") ---@module Utilities
 local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
+local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 
 --= Types =--
 
@@ -90,11 +91,14 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, itemId : 
 		return
 	end
 
+	--NOTE: In the event the client holds onto the request forever, we dont want to block the server.
+	local clientPrice = ServerClientInfoHandler:GetProductPriceForPlayer(player, itemId, itemType)
+
 	-- Don't send redundant information over the wire
 	local args = {
 		["type"] = ENUM_TO_TYPE[itemType] or "unknown",
 		["id"] = itemId,
-		["price"] = itemInfo.PriceInRobux,
+		["price"] = clientPrice or itemInfo.PriceInRobux,
 		["name"] = itemInfo.Name,
 		["description"] = itemInfo.Description,
 		["imageId"] = "https://assetdelivery.roblox.com/v1/asset?id=".. itemId
