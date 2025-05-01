@@ -77,6 +77,7 @@ function SocialHandler:Init()
         if joinData.ReferredByPlayerId and joinData.ReferredByPlayerId > 0 then
             EngagementMarkers:SDKMarker("JoinedUser", {
                 userId = joinData.ReferredByPlayerId,
+                isFriend = player:IsFriendsWith(joinData.ReferredByPlayerId),
             }, { player = player })
         end
 
