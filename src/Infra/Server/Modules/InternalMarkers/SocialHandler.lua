@@ -53,10 +53,10 @@ end
 
 --= API Functions =--
 
-function SocialHandler:GetTotalFriendPlaytime(player : Player) : number
+function SocialHandler:GetTotalFriendPlaytime(player : Player) : number?
     local cachedData = FriendsInServerCache[player]
-    if not cachedData then
-        return 0
+    if not cachedData or cachedData.UpdatedByClient == false then
+        return nil
     end
 
     FriendsInServerCache[player] = nil

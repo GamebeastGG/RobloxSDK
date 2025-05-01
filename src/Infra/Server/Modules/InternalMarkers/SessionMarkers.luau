@@ -87,9 +87,10 @@ function SessionMarkers:Init()
 		
 		-- Compute session length in addition to backend for reasons(?)
 		local sessionLength = Utilities.roundNum(tick() - PlayerStats:GetStat(player, "session_length"), 0.1)
+		local friendPlaytimePercent = SocialHandler:GetTotalFriendPlaytime(player)
 		local args = {
 			["sessionLength"] = sessionLength,
-			["friendPlayPercent"] = Utilities.roundNum(SocialHandler:GetTotalFriendPlaytime(player)/sessionLength, 0.01)
+			["sessionLengthPercentageWithFriends"] = if friendPlaytimePercent then Utilities.roundNum(friendPlaytimePercent/sessionLength, 0.01) else nil
 		}
 
 		-- Send Logout marker with relevant info
