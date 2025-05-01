@@ -30,11 +30,13 @@ local SignalTimeout = shared.GBMod("SignalTimeout") ---@module SignalTimeout
 local ClientInfoRemote = GetRemote("Event", "ClientInfoChanged")
 local ClientProductPriceRemote = GetRemote("Function", "GetProductPrice")
 local ClientInfoResolvedSignal = Signal.new()
+local ClientInfoChangedSignal = Signal.new()
 
 --= Constants =--
 
 local DEFAULT_INFO = {
     device = "unknown",
+    friendsOnline = 0,
 }
 
 --= Variables =--
@@ -78,6 +80,14 @@ function ServerClientInfoHandler:OnClientInfoResolved(player : Player, timeoutSe
     end)
 end
 
+function ServerClientInfoHandler:OnClientInfoChanged(player : Player, callback : (key : string, value : any) -> nil) : RBXScriptConnection
+    return ClientInfoChangedSignal:Connect(function(changedPlayer : Player, key : string, value : any)
+        if changedPlayer == player then
+            callback(key, value)
+        end
+    end)
+end
+
 -- Good way to tell if the client SDK is even initialized.
 function ServerClientInfoHandler:IsClientInfoResolved(player : Player | number) : boolean
     if typeof(player) == "number" then
@@ -113,22 +123,23 @@ function ServerClientInfoHandler:Init()
         ClientInfoCache[player] = nil
     end)
 
-    ClientInfoRemote.OnServerEvent:Connect(function(player : Player, updatedData : { [string] : any })
-        for key in pairs(updatedData) do
-            if not DEFAULT_INFO[key] then
-                return
-            end
+    ClientInfoRemote.OnServerEvent:Connect(function(player : Player, updatedKey : string, updatedValue : any)
+        if not updatedKey or not updatedValue then
+            return
         end
- 
+
+        if DEFAULT_INFO[updatedKey] == nil then
+            return
+        end
+
         local isNew = false
         if not ClientInfoCache[player] then
             ClientInfoCache[player] = table.clone(DEFAULT_INFO)
             isNew = true
         end
 
-        for key, value in pairs(updatedData) do
-            ClientInfoCache[player][key] = value
-        end
+        ClientInfoCache[player][updatedKey] = updatedValue
+        ClientInfoChangedSignal:Fire(player, updatedKey, updatedValue)
 
         if isNew then
             ClientInfoResolvedSignal:Fire(player, ClientInfoCache[player])
