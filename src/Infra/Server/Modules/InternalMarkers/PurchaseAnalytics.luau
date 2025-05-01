@@ -99,6 +99,8 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, itemId : 
 		["type"] = ENUM_TO_TYPE[itemType] or "unknown",
 		["id"] = itemId,
 		["price"] = clientPrice or itemInfo.PriceInRobux,
+		["basePrice"] = itemInfo.PriceInRobux,
+		["isPriceFromClient"] = (clientPrice ~= nil),
 		["name"] = itemInfo.Name,
 		["description"] = itemInfo.Description,
 		["imageId"] = "https://assetdelivery.roblox.com/v1/asset?id=".. itemId

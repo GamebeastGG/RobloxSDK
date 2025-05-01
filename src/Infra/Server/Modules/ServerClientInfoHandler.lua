@@ -107,7 +107,9 @@ function ServerClientInfoHandler:GetProductPriceForPlayer(player : Player | numb
     end
 
     local success, result = pcall(function()
-        return ClientProductPriceRemote:InvokeClient(player, productId, productType)
+        local price = ClientProductPriceRemote:InvokeClient(player, productId, productType)
+        assert(typeof(price) == "number" and price >= 0, "Invalid price from client")
+        return price
     end)
 
     if not success then
