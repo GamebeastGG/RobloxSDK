@@ -195,7 +195,9 @@ function InternalConfigs:OnChanged(player: Player?, targetConfig : string | {str
 		for _, change in changes do
 			local match = true
 			for index, path in targetConfig do
-				if path ~= change.path[index] then
+				if change.path[index] == nil then
+					break
+				elseif path ~= change.path[index] then
 					match = false
 					break
 				end
