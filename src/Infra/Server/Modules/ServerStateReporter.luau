@@ -80,7 +80,7 @@ end
 -- Send server state report to GB
 function ServerStateReporter:SendServerStateReport()
     local serverStateReport = self:PrepareServerStateReport()
-    local serverId = if RunService:IsStudio() then HttpService:GenerateGUID() else game.JobId
+    local serverId = if RunService:IsStudio() then HttpService:GenerateGUID(false) else game.JobId
 
     GBRequests:GBRequest(`v1/servers/roblox/{serverId}`, serverStateReport)
 end
