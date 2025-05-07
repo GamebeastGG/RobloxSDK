@@ -104,7 +104,7 @@ function ServerStateReporter:PrepareServerStateReport()
         placeVersion = game.PlaceVersion,
         players = userIds,
         metadata = {
-            ping = AggregateMetric(metricHistory.ClientPing),
+            clientPing = AggregateMetric(metricHistory.ClientPing),
             clientMemoryUsage = AggregateMetric(metricHistory.ClientMemoryUsage),
             clientFps = AggregateMetric(metricHistory.ClientPhysicsFps),
             serverMemoryUsage = AggregateMetric(metricHistory.MemoryUsage),
@@ -115,8 +115,6 @@ function ServerStateReporter:PrepareServerStateReport()
             privateServerOwnerId = game.PrivateServerOwnerId
         }
     }
-
-    print(serverStateReport)
 
     return serverStateReport
 end
