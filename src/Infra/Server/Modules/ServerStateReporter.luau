@@ -33,11 +33,11 @@ type ClientMetricReport = {
 }
 
 --= Object References =--
-local MetricReportRemote = GetRemote("Event", "MetricReportRemote")
+local ExportMetricsRemote = GetRemote("Event", "ExportClientMetrics")
 
 --= Constants =--
 local PROBE_FREQUENCY = 1 -- seconds
-local REPORT_FREQUENCY = 5 -- seconds
+local REPORT_FREQUENCY = 30 -- seconds
 
 --= Variables =--
 
@@ -98,7 +98,7 @@ function ServerStateReporter:PrepareServerStateReport()
     
     -- construct the server state report
     local serverStateReport = {
-        timestamp = DateTime.now().UnixTimestampMillis,
+        timestamp = DateTime.now():ToIsoDate(),
         rootPlaceId = game.PlaceId,
         universeId = game.GameId,
         placeVersion = game.PlaceVersion,
@@ -110,7 +110,7 @@ function ServerStateReporter:PrepareServerStateReport()
             serverMemoryUsage = AggregateMetric(metricHistory.MemoryUsage),
             serverFps = AggregateMetric(metricHistory.PhysicsFps),
             serverAgeSeconds = Workspace.DistributedGameTime,
-            matchmakingType = game.MatchmakingType,
+            matchmakingType = game.MatchmakingType.Name,
             privateServerId = game.PrivateServerId,
             privateServerOwnerId = game.PrivateServerOwnerId
         }
@@ -135,7 +135,7 @@ function ServerStateReporter:Init()
         end
     end)
 
-    MetricReportRemote.OnServerEvent:Connect(function(player : Player, metrics : ClientMetricReport)
+    ExportMetricsRemote.OnServerEvent:Connect(function(player : Player, metrics : ClientMetricReport)
         -- only use the first 10 values
         -- this is because the client will report the history every 10 seconds,
         -- and probes every 1 second, so in theory it's always going to be 10 values
