@@ -15,7 +15,6 @@ local ServerStateReporter = {}
 
 --= Roblox Services =--
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local Stats = game:GetService("Stats")
@@ -109,7 +108,7 @@ function ServerStateReporter:PrepareServerStateReport()
             clientFps = AggregateMetric(metricHistory.ClientPhysicsFps),
             serverMemoryUsage = AggregateMetric(metricHistory.MemoryUsage),
             serverFps = AggregateMetric(metricHistory.PhysicsFps),
-            serverAgeSeconds = Workspace.DistributedGameTime,
+            serverAgeSeconds = workspace.DistributedGameTime,
             matchmakingType = game.MatchmakingType.Name,
             privateServerId = game.PrivateServerId,
             privateServerOwnerId = game.PrivateServerOwnerId
@@ -124,7 +123,7 @@ function ServerStateReporter:Init()
     task.spawn(function()
         while task.wait(PROBE_FREQUENCY) do
             MetricCollector:ReportMetric("MemoryUsage", Stats:GetTotalMemoryUsageMb())
-            MetricCollector:ReportMetric("PhysicsFps", Workspace:GetRealPhysicsFPS())
+            MetricCollector:ReportMetric("PhysicsFps", workspace:GetRealPhysicsFPS())
         end
     end)
 
