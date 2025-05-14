@@ -33,7 +33,6 @@ local SocialHandler = shared.GBMod("SocialHandler") ---@module SocialHandler
 
 --= Variables =--
 
-local CharConnections = {}
 local LastCharPositions = {}
 
 
@@ -46,24 +45,6 @@ local LastCharPositions = {}
 --= Initializers =--
 function SessionMarkers:Init()
 	Utilities:OnPlayerAdded(function(player : Player)
-		-- Track deaths by default
-		player.CharacterAdded:Connect(function(char)
-			local hum = char:FindFirstChildOfClass("Humanoid")
-			
-			if hum then
-				CharConnections[player] = hum.Died:Connect(function()
-					local primaryPart = char.PrimaryPart
-					
-					-- Still helpful to tell where players are falling out of the map. Solutions?
-					if primaryPart then
-						EngagementMarkers:SDKMarker("Died", nil, {player = player, position = primaryPart.Position})
-						CharConnections[player]:Disconnect()
-						CharConnections[player] = nil
-					end
-				end)
-			end
-		end)
-		
 		-- Collect last position with this event given PlayerRemoving was inconsistent on character still existing for providing position for Logout markers
 		player.CharacterRemoving:Connect(function(char)
 			local position = char.PrimaryPart and char.PrimaryPart.Position or nil
@@ -95,11 +76,6 @@ function SessionMarkers:Init()
 
 		-- Send Logout marker with relevant info
 		EngagementMarkers:SDKMarker("Logout", args, {player = player, position = position})
-
-		if CharConnections[player] then
-			CharConnections[player]:Disconnect()
-			CharConnections[player] = nil
-		end
 	end)
 end
 
