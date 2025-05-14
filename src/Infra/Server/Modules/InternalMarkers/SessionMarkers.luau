@@ -52,12 +52,14 @@ function SessionMarkers:Init()
 		end)
 		
 		-- Send Login marker with relevant session information
+		local policyInfo = Utilities.promiseReturn(1, function()
+			return PolicyService:GetPolicyInfoForPlayerAsync(player)
+		end)
+
 		local loginArgs = {
-			adsAllowed = Utilities.promiseReturn(1, function()
-				return PolicyService:GetPolicyInfoForPlayerAsync(player).AreAdsAllowed
-			end),
+			policyInfo = policyInfo
 		}
-		
+
 		EngagementMarkers:SDKMarker("Login", loginArgs, {player = player, position = nil})
 	end)
 

@@ -38,7 +38,7 @@ utilities.resolvePlayerObject = function(playerQuery : Player | number)
 end
 
 -- pcall wrapper function with retry support used extensively in SDK.
-utilities.promiseReturn = function(maxRetries, callback, retries)
+utilities.promiseReturn = function(maxRetries, callback, retries) : (any?, boolean)
 	if maxRetries and not retries then
 		retries = 0
 	elseif retries and retries > maxRetries then
