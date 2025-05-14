@@ -92,7 +92,20 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, itemId : 
 	end
 
 	--NOTE: In the event the client holds onto the request forever, we dont want to block the server.
-	local clientPrice = ServerClientInfoHandler:GetProductPriceForPlayer(player, itemId, itemType)
+	local clientPrice = if itemInfo.PriceInRobux then ServerClientInfoHandler:GetProductPriceForPlayer(player, itemId, itemType) else nil
+
+	-- Sanity check the client price
+	if clientPrice then
+		-- Price can only be a minimum of 30% the base price.
+		if clientPrice/itemInfo.PriceInRobux < 0.3 then
+			clientPrice = nil
+		end
+
+		-- Price cant be greater than the base price.
+		if clientPrice > itemInfo.PriceInRobux then
+			clientPrice = nil
+		end
+	end
 
 	-- Don't send redundant information over the wire
 	local args = {
@@ -100,7 +113,6 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, itemId : 
 		["id"] = itemId,
 		["price"] = clientPrice or itemInfo.PriceInRobux,
 		["basePrice"] = itemInfo.PriceInRobux,
-		["isPriceFromClient"] = (clientPrice ~= nil),
 		["name"] = itemInfo.Name,
 		["description"] = itemInfo.Description,
 		["imageId"] = "https://assetdelivery.roblox.com/v1/asset?id=".. itemId
