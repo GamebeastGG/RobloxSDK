@@ -29,7 +29,7 @@ local ExportMetricsRemote = GetRemote("Event", "ExportClientMetrics")
 local PROBE_FREQUENCY = 1 -- seconds
 -- how often the client instance of MetricCollector will report it's metrics
 -- to the server
-local REPORT_FREQUENCY = 30 -- seconds
+local REPORT_FREQUENCY = 10 -- seconds
 
 function ClientMetricExporter:Init()
     -- probe metrics on timer

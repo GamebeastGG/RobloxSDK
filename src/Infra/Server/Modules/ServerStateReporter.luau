@@ -36,7 +36,7 @@ local ExportMetricsRemote = GetRemote("Event", "ExportClientMetrics")
 
 --= Constants =--
 local PROBE_FREQUENCY = 1 -- seconds
-local REPORT_FREQUENCY = 30 -- seconds
+local REPORT_FREQUENCY = 10 -- seconds
 
 --= Variables =--
 
