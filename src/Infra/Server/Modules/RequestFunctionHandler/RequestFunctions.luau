@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local ChatService = game:GetService("Chat")
 local Updater = shared.GBMod("Updater")
 local Utilities = shared.GBMod("Utilities")
+local Experiments = shared.GBMod("Experiments")
 
 -- Header comments provide info on request details sent from backend.
 
@@ -126,8 +127,24 @@ requestFunctions.funcs = {
 	-- host_only: false
 	-- async: false
 	["UpdateConfigs"] = function(request)
+		Utilities.GBLog("Received config update request", request)
 		Updater:UpdateConfigs(request.args)
 	end;
+
+	-- host_only: false
+	-- async: false
+	["PropagateAvailableExperiments"] = function (request)
+		Utilities.GBLog("Received experiment update request", request)
+		Experiments:UpdateStateFromAvailableExperiments(request.args)
+	end,
+
+	-- host_only: false
+	-- async: false
+	["PropagateExperimentReassignment"] = function (request)
+		Utilities.GBLog("Received experiment reassignment request", request)
+		Experiments:ProcessExperimentReassignmentRequest(request.args)
+	end,
+
 	
 	-- Not yet implemented
 	--["CustomJob"] = function(request)

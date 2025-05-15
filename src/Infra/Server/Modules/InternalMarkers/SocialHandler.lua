@@ -20,6 +20,8 @@ local Players = game:GetService("Players")
 --= Dependencies =--
 
 local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module EngagementMarkers
+local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
+local PlayerStats = shared.GBMod("PlayerStats") ---@module PlayerStats
 
 --= Types =--
 
@@ -35,66 +37,73 @@ local FriendsInServerCache = {}
 
 --= Internal Functions =--
 
-local function CreateCacheEntry(player : Player)
-    FriendsInServerCache[player] = {
+local function CreateCacheEntry(player : Player) : { [string]: any }
+    local newEntry = {
         Timestamp = tick(),
         TotalTime = 0,
-        Friends = {},
+        FriendInServer = false,
+        UpdatedByClient = false,
+        _connection = nil
     }
-end
 
-local function FriendStatusUpdated(player : Player, friend : Player, friendJoin : boolean)
-    if player.Parent == nil or FriendsInServerCache[player] == nil then return end
+    FriendsInServerCache[player] = newEntry
 
-    local cachedData = FriendsInServerCache[player]
-    local friendIndex = table.find(cachedData.Friends, friend)
-    
-    if friendJoin and not friendIndex then
-        table.insert(cachedData.Friends, friend)
-
-        if #cachedData.Friends == 1 then
-            cachedData.Timestamp = tick()
-        end
-    elseif friendJoin == false and friendIndex then
-        table.remove(cachedData.Friends, friendIndex)
-        
-        if #cachedData.Friends == 0 then
-            cachedData.TotalTime += tick() - cachedData.Timestamp
-        end
-    end
+    return newEntry
 end
 
 --= API Functions =--
 
-function SocialHandler:GetTotalFriendPlaytime(player : Player) : number
+function SocialHandler:GetTotalFriendPlaytime(player : Player) : number?
     local cachedData = FriendsInServerCache[player]
-    if not cachedData then
-        return 0
+    if not cachedData or cachedData.UpdatedByClient == false then
+        return nil
     end
 
-    if #cachedData.Friends  > 0 then
+    FriendsInServerCache[player] = nil
+
+    if cachedData.FriendInServer then
         return cachedData.TotalTime + (tick() - cachedData.Timestamp)
     else
         return cachedData.TotalTime
     end
-
-    FriendsInServerCache[player] = nil
 end
 
 --= Initializers =--
 function SocialHandler:Init()
     local function playerAdded(player : Player)
-        CreateCacheEntry(player)
+        local cacheEntry = CreateCacheEntry(player)
 
         local joinData = player:GetJoinData()
         if joinData.ReferredByPlayerId and joinData.ReferredByPlayerId > 0 then
             EngagementMarkers:SDKMarker("JoinedUser", {
                 userId = joinData.ReferredByPlayerId,
+                isFriend = player:IsFriendsWith(joinData.ReferredByPlayerId),
             }, { player = player })
         end
 
+        cacheEntry._connection = ServerClientInfoHandler:OnClientInfoChanged(player, function(key, value)
+            if key == "friendsOnline" then
+                local hasFriendsInServer = value > 0
 
-        -- Look for friends
+                if cacheEntry.UpdatedByClient == false and hasFriendsInServer then
+                    local joinedAt = PlayerStats:GetStat(player, "session_length")
+                    cacheEntry.TotalTime += (tick() - joinedAt)
+                end
+
+                cacheEntry.UpdatedByClient = true
+
+                if hasFriendsInServer == false and cacheEntry.FriendInServer == true then
+                    cacheEntry.TotalTime += (tick() - cacheEntry.Timestamp)
+                elseif hasFriendsInServer == true and cacheEntry.FriendInServer == false then
+                    cacheEntry.Timestamp = tick()
+                end
+
+                cacheEntry.FriendInServer = hasFriendsInServer
+            end
+        end)
+
+        --NOTE: Disabled since large servers with lots of players joining will result in too many HTTP requests.
+        --[[ Look for friends
         for _, potentialFriend in ipairs(Players:GetPlayers()) do
             if potentialFriend ~= player and (player:IsFriendsWith(potentialFriend.UserId) or player.UserId < 0) then
                 FriendStatusUpdated(player, potentialFriend, true)
@@ -114,7 +123,7 @@ function SocialHandler:Init()
                 friendUserId = cachedData.Friends[1].UserId,
                 friendsInServer = #cachedData.Friends,
             }, { player = player })
-        end
+        end]]
     end
 
     Players.PlayerAdded:Connect(playerAdded)
@@ -123,13 +132,8 @@ function SocialHandler:Init()
     end
 	
     Players.PlayerRemoving:Connect(function(player)
-        for _, potentialFriend in ipairs(Players:GetPlayers()) do
-            if potentialFriend == player then
-                continue
-            end
-
-            FriendStatusUpdated(player, potentialFriend, false)
-            FriendStatusUpdated(potentialFriend, player, false)
+        if FriendsInServerCache[player] then
+            FriendsInServerCache[player]._connection:Disconnect()
         end
     end)
 

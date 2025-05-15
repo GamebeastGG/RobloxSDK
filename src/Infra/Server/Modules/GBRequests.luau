@@ -30,13 +30,9 @@ local MetaData = shared.GBMod("MetaData") ---@module MetaData
 
 local URL_SUFFIX = "/sdk"
 local ENDPOINTS = {
-	{
+	{ 
 		URL = "https://api.gamebeast.gg" .. URL_SUFFIX, -- http://localhost:3001 -- https://api.gamebeast.gg -- https://api.stage.gamebeast.gg
-		Requests = {
-			--["application/boot_info"] = "GET", -- UNUSED
-			--["users/create"] = "POST", -- UNUSED
-			--["health_check"] = "GET", -- UNUSED
-			--["jobs/create"] = "POST", -- UNUSED
+		Requests = { -- NOTE: If you require URL parameters, use {param} in the route string. Example: "v1/servers/roblox/{serverId}"
 			["v1/markers"] = "POST",
 			["v1/requests"] = "GET",
 			["v1/requests/completed"] = "POST",
@@ -44,8 +40,11 @@ local ENDPOINTS = {
 			["v1/configurations"] = "GET",
 			["v1/heatmap"] = "POST",
 			["v1/heatmap/waypoint"] = "POST",
-			["v1/latest/version?platform=roblox"] = "GET"
-		}
+			["v1/latest/version?platform=roblox"] = "GET",
+			["v1/experiments/assignments"] = "POST",
+			["v1/servers/roblox/{serverId}"] = "POST"
+		},
+		EndpointTree = {} -- Automatically generated from above
 	}
 }
 
@@ -55,18 +54,23 @@ local FinalRequestSignal = Signal.new()
 local RequestProcessingCount = 0
 
 --= Variables =--
-
 local KeyYeildWarning = false
 -- One time warning if requests are failing because of invalid/unset key
 local KeyWarningGiven = false
 
 --= Internal Functions =--
 
-local function GetEndpointForRequest(requestType) : (string?, string?)
+local function GetEndpointForRequest(requestRoute : string) : (string?, string?)
 	for _, endpoint in ENDPOINTS do
-		if endpoint.Requests[requestType] then
-			return endpoint.URL, endpoint.Requests[requestType]
+		local current = endpoint.EndpointTree
+		for _, part in string.split(requestRoute, "/") do
+			current = current[part]
+			if not current then
+				return nil, nil
+			end
 		end
+
+		return endpoint.URL, current["__method"]
 	end
 end
 
@@ -99,25 +103,23 @@ end
 
 -- Main method for dispatching requests from SDK to backend
 -- Returns parsed body and original response if body can be resolve and response only otherwise
-function GBRequests:GBRequest(requestType : string, args : {[string] : any}) : nil
-	local _, requestsMethod = GetEndpointForRequest(requestType)
+function GBRequests:GBRequest(requestRoute : string, args : {[string] : any}) : nil
+	local _, requestsMethod = GetEndpointForRequest(requestRoute)
 	if requestsMethod ~= "POST" then
 		Utilities.GBWarn("GBRequest should only be used for POST requests. Use GBRequestAsync for other request types.")
 	end
 
 	task.spawn(function()
-		self:GBRequestAsync(requestType, args)
+		self:GBRequestAsync(requestRoute, args)
 	end)
 end
 
 --YEILDS 
-function GBRequests:GBRequestAsync(requestType : string, args : {[string] : any}, maxRetries : number?) : (boolean, any?)
+function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any}, maxRetries : number?) : (boolean, any?)
 	RequestProcessingCount += 1
-	local GBDomain, requestMethod = GetEndpointForRequest(requestType)
+	local GBDomain, requestMethod = GetEndpointForRequest(requestRoute)
 	local requestBody
 	args = args or {}
-
-	local partition = shared.GBMod("ABTesting").CUR_PARTITION
 
 	local authKey = YeildForKey()
 
@@ -127,8 +129,6 @@ function GBRequests:GBRequestAsync(requestType : string, args : {[string] : any}
 		["isstudio"] = tostring(RunService:IsStudio()),
 		["sdkversion"] = MetaData.version,
 		["universeid"] = tostring(game.GameId),
-		-- optional, to be removed with A/B testing overhaul
-		["partitionid"] = partition ~= "" and partition or nil,
 	}
 
 	-- JobId is undefined in studio so send a hard coded default for this environment
@@ -138,7 +138,7 @@ function GBRequests:GBRequestAsync(requestType : string, args : {[string] : any}
 		headers["serverid"] = game.JobId
 	end
 
-	local url = GBDomain.. "/".. requestType
+	local url = GBDomain.. "/".. requestRoute
 
 	if requestMethod == "POST" or requestMethod == "PUT" then
 		requestBody = HttpService:JSONEncode(args)
@@ -197,6 +197,35 @@ function GBRequests:Init()
 			task.wait()
 		until RequestProcessingCount == 0
 	end)
+end
+
+do -- Generate endpoint tree for fast lookup
+	for _, endpoint in ENDPOINTS do
+		for route, method in endpoint.Requests do
+			local path = string.split(route, "/")
+			local current = endpoint.EndpointTree
+			for _, part in path do
+				local isParamRoute = string.match(part, "{(.*)}") ~= nil
+
+				if not current[part] then
+					if isParamRoute then
+						local nextPath = {}
+						setmetatable(current, {
+							__index = function(self, key)
+								return nextPath
+							end
+						})
+					else
+						current[part] = {}
+					end
+				end
+
+				current = current[part]
+			end
+
+			current["__method"] = method
+		end
+	end
 end
 
 --= Return Module =--

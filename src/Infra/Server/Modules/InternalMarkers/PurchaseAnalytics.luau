@@ -21,6 +21,7 @@ local Players = game:GetService("Players")
 
 local Utilities = shared.GBMod("Utilities") ---@module Utilities
 local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
+local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 
 --= Types =--
 
@@ -90,11 +91,28 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, itemId : 
 		return
 	end
 
+	--NOTE: In the event the client holds onto the request forever, we dont want to block the server.
+	local clientPrice = if itemInfo.PriceInRobux then ServerClientInfoHandler:GetProductPriceForPlayer(player, itemId, itemType) else nil
+
+	-- Sanity check the client price
+	if clientPrice then
+		-- Price can only be a minimum of 30% the base price.
+		if clientPrice/itemInfo.PriceInRobux < 0.3 then
+			clientPrice = nil
+		end
+
+		-- Price cant be greater than the base price.
+		if clientPrice > itemInfo.PriceInRobux then
+			clientPrice = nil
+		end
+	end
+
 	-- Don't send redundant information over the wire
 	local args = {
 		["type"] = ENUM_TO_TYPE[itemType] or "unknown",
 		["id"] = itemId,
-		["price"] = itemInfo.PriceInRobux,
+		["price"] = clientPrice or itemInfo.PriceInRobux,
+		["basePrice"] = itemInfo.PriceInRobux,
 		["name"] = itemInfo.Name,
 		["description"] = itemInfo.Description,
 		["imageId"] = "https://assetdelivery.roblox.com/v1/asset?id=".. itemId

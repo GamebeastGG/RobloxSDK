@@ -93,7 +93,9 @@ function ClientConfigs:OnChanged(targetConfig : string | {string}, callback : (n
         for _, change in changes do
             local match = true
             for index, pathSegment in targetConfig do
-                if change.path[index] ~= pathSegment then
+                if change.path[index] == nil then
+                    break
+                elseif change.path[index] ~= pathSegment then
                     match = false
                     break
                 end

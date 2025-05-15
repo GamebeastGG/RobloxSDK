@@ -23,7 +23,8 @@ local RunService = game:GetService("RunService")
 --= Dependencies =--
 
 local GBRequests = shared.GBMod("GBRequests")
-local ABTesting = shared.GBMod("ABTesting")
+local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module EngagementMarkers
+local Experiments = shared.GBMod("Experiments") ---@module Experiments
 local Utilities = shared.GBMod("Utilities")
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
 local Signal = shared.GBMod("Signal")
@@ -34,6 +35,16 @@ local MetaData = shared.GBMod("MetaData") ---@module MetaData
 --= Constants =--
 
 local BACKUP_STORE_KEY = (RunService:IsStudio() and "Studio" or "") .. "GBConfigBackup"
+
+--[[
+	When config is being applied, this controls the maximum amount of seconds
+	to wait for initial experiment assignment to complete before giving up
+	and using the canonical config.
+
+	If it takes longer, it will continue waiting for assignment to complete in the
+	background, and apply assigned configs as they are received.
+]]
+local MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME = 5
 
 --= Object References =--
 
@@ -76,30 +87,50 @@ function Updater:UpdateConfigs(newConfigs, init)
 	-- Update game configs
 	init = init or not InternalConfigs:IsReady()
 
-	-- Determine whether we're using canonical config profile or A/B testing partition
+	-- Trigger experiment assignment, if applicable
+	-- (this may yield, so it's limited by a timer to avoid blocking config readiness for too long)
+	local availableExperimentsSnapshot = newConfigs.GBConfigs.Experiments
+	if availableExperimentsSnapshot then
+		local thread = coroutine.running()
+		local didResume = false
+		task.spawn(function ()
+			Experiments:UpdateStateFromAvailableExperiments(availableExperimentsSnapshot, {
+				variables = newConfigs.configs,
+				options = newConfigs.options,
+			})
+			if not didResume then
+				didResume = true
+				coroutine.resume(thread)
+			end
+		end)
+		task.delay(MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME, function()
+			if not didResume then
+				didResume = true
+				Utilities.GBWarn("Initial experiment assignment taking unusually long, temporarily falling back to canonical config")
+				coroutine.resume(thread)
+			end
+		end)
+		if not didResume then
+			coroutine.yield()
+		end
+	end
 
-	-- ABTesting is integral to the configs, but it cant be a leaf.
-	-- Maybe we have it listen and then fire 
+	-- If players are assigned to an experiment, use that config for them
+	for player, playerConfigs in Experiments.AssignedConfigByPlayer do
+		InternalConfigs:ApplyConfigs(player, playerConfigs.variables, playerConfigs.options.privacy, init)
+	end
 
-	local configsToIntegrate, configName = ABTesting:GetConfigProfileForServer(newConfigs)
-	
-	-- This block is irrelevant now with sending analytics data through as markers with the partition ID contained
-	---- If we were on a server A/B testing campaign
-	--if curPartition ~= "" then
-	--	if shared.GBMod("ABTesting").getNumPartitions(newConfigs) == 0 then
-	--		-- We were on a server campaign but now we're not
-	--	elseif not newConfigs.GBConfigs.ABTestingCampaigns.partitions[curPartition] then
-	--		-- A new server campaign was deployed, last terminated
-	--	end
-	--end
- 
-	ABTesting:SetCurrentPartition(configName)
-
-	-- Integrate new configs
-
-	InternalConfigs:ApplyConfigs(configsToIntegrate, (newConfigs.options.privacy or {}), init)
-
-
+	-- If server is assigned to an experiment, use that config, otherwise use canonical config
+	if Experiments.AssignedServerConfig then
+		InternalConfigs:ApplyConfigs(
+			nil,
+			Experiments.AssignedServerConfig.variables,
+			Experiments.AssignedServerConfig.options.privacy,
+			init
+		)
+	else
+		InternalConfigs:ApplyConfigs(nil, newConfigs.configs, newConfigs.options.privacy, init)
+	end
 
 	--[[ Signal mod update
 	if not init then
@@ -120,14 +151,22 @@ function Updater:GetBackupConfigs()
 		Utilities.GBWarn("Couldn't get configs from backup. Attempting to re-establish connection with Gamebeast...")
 	end
 
+	-- Clear any experiment snapshot data from the backup configs
+	if configs then
+		configs.GBConfigs.Experiments = nil
+	end
+
 	return configs
 end
 
 -- Save new configs to Roblox datastores for backup
 -- NOTE: if a server is starting up and there are a bunch of update config jobs pending, this can throttle, should probably add a flag
 function Updater:SaveConfigsToBackup(newConfigs)
+	local newBackupConfigs = Utilities.recursiveCopy(newConfigs)
+	newBackupConfigs.GBConfigs.Experiments = nil
+
 	Utilities.promiseReturn(1, function()
-		BackupConfigStore:SetAsync(BACKUP_STORE_KEY, newConfigs)
+		BackupConfigStore:SetAsync(BACKUP_STORE_KEY, newBackupConfigs)
 	end)
 end
 
@@ -176,12 +215,41 @@ function Updater:Init()
 		end
 	end
 
+	-- Update marker properties when experiments are running
+	Experiments.OnServerGroupIdChanged:Connect(function (groupId)
+		EngagementMarkers:SetServerExperimentGroupId(groupId)
+	end)
+	Experiments.OnPlayerGroupIdChanged:Connect(function (player, groupId)
+		EngagementMarkers:SetPlayerExperimentGroupId(player, groupId)
+	end)
 
 	-- Update configs for server with initialization flag
 	self:UpdateConfigs(newConfigs, true)
 
-	ABTesting.NewConfigSignal:Connect(function(...)
-		self:UpdateConfigs(...)
+	-- When the server's assigned experiment config changes, update the internal configs
+	Experiments.OnAssignedServerConfigChanged:Connect(function (newAssignedConfigs)
+		if InternalConfigs:IsReady() then
+			if newAssignedConfigs then
+				InternalConfigs:ApplyConfigs(nil, newAssignedConfigs.variables, newAssignedConfigs.options.privacy)
+			else
+				InternalConfigs:ApplyConfigs(
+					nil,
+					Experiments.CanonicalServerConfig.variables,
+					Experiments.CanonicalServerConfig.options.privacy
+				)
+			end
+		end
+	end)
+
+	-- When players' assigned experiment config changes, update per-player internal configs
+	Experiments.OnAssignedPlayerConfigChanged:Connect(function (player, newAssignedConfigs)
+		if InternalConfigs:IsReady() then
+			if newAssignedConfigs then
+				InternalConfigs:ApplyConfigs(player, newAssignedConfigs.variables, newAssignedConfigs.options.privacy)
+			else
+				InternalConfigs:ApplyConfigs(player, nil, nil)
+			end
+		end
 	end)
 end
 
