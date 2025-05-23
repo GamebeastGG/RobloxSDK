@@ -1,0 +1,58 @@
+name: Delete Redis Keys on PR Merge to Main
+
+on:
+  push:
+    branches:
+      - feat/actions-delete-redis-keys
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+jobs:
+  delete-redis-keys:
+
+    #if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: "Authenticate to Google Cloud"
+        uses: "google-github-actions/auth@v2"
+        with:
+          project_id: "x-cycling-414419"
+          workload_identity_provider: "projects/577495761779/locations/global/workloadIdentityPools/github-actions/providers/github-actions-provider"
+          service_account: "service-account-github-act-764@x-cycling-414419.iam.gserviceaccount.com"
+
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: "gke-gcloud-auth-plugin,beta"
+
+      - name: Verify gcloud authentication
+        run: |
+          gcloud auth list
+
+      - name: Set up SSH SOCKS proxy
+        env:
+          REDIS_HOST: 10.128.15.192
+        run: |
+          gcloud beta compute ssh proxy-prod-cluster \
+            --project x-cycling-414419 \
+            --zone us-central1-a \
+            --tunnel-through-iap \
+            --ssh-flag="-4 -L 6379:$REDIS_HOST:6379 -N -q -f"
+
+      - name: Install Redis CLI
+        run: sudo apt-get update && sudo apt-get install -y redis-tools
+
+      - name: Delete Redis Keys
+        env:
+          REDIS_PORT: ${{ secrets.REDIS_PORT || '6379' }}
+        run: |
+          echo "Connecting to Redis at $REDIS_HOST:$REDIS_PORT"
+          redis-cli -c -h 127.0.0.1 -p $REDIS_PORT DEL latestSdkSourceCode latestSdkVersion
