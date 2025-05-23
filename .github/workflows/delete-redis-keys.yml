@@ -55,5 +55,5 @@ jobs:
           REDIS_PORT: ${{ secrets.REDIS_PORT || '6379' }}
         run: |
           echo "Connecting to Redis at 127.0.0.1:$REDIS_PORT"
-          redis-cli -c -h 127.0.0.1 -p $REDIS_PORT DEL latestSdkSourceCode 
-          redis-cli -c -h 127.0.0.1 -p $REDIS_PORT DEL latestSdkVersion
+          timeout 15s redis-cli -c -h 127.0.0.1 -p $REDIS_PORT DEL latestSdkSourceCode 
+          timeout 15s redis-cli -c -h 127.0.0.1 -p $REDIS_PORT DEL latestSdkVersion
