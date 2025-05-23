@@ -175,7 +175,7 @@ function RequestFunctionHandler:ExecuteRequests(requests : {})
                             return
                         end
 
-                        local success, data = pcall(requestFunc, request)
+                        local success, data = pcall(requestFunc, request.args)
 
                         if not success then
                             AddResult(false, request.requestId, {details=data})
