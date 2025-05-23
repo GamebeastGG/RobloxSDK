@@ -124,15 +124,16 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 	local authKey = YeildForKey()
 
 	-- Define relevant headers. Backend enforces header presence unless specified.
+	local isStudio = RunService:IsStudio()
 	local headers = {
 		["authorization"] = authKey,
-		["isstudio"] = tostring(RunService:IsStudio()),
+		["isstudio"] = tostring(isStudio),
 		["sdkversion"] = MetaData.version,
 		["universeid"] = tostring(game.GameId),
 	}
 
 	-- JobId is undefined in studio so send a hard coded default for this environment
-	if headers["isstudio"] then
+	if isStudio == false then
 		headers["serverid"] = "00000000-0000-0000-0000-000000000000"
 	else
 		headers["serverid"] = game.JobId
