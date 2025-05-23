@@ -50,10 +50,12 @@ jobs:
       - name: Install Redis CLI
         run: sudo apt-get update && sudo apt-get install -y redis-tools
 
-      - name: Delete Redis Keys
-        env:
-          REDIS_PORT: ${{ secrets.REDIS_PORT || '6379' }}
+      - name: Delete Redis latestSdkSourceCode Key
         run: |
-          echo "Connecting to Redis at 127.0.0.1:$REDIS_PORT"
-          timeout 15s redis-cli -c -h 127.0.0.1 -p $REDIS_PORT DEL latestSdkSourceCode 
-          timeout 15s redis-cli -c -h 127.0.0.1 -p $REDIS_PORT DEL latestSdkVersion
+          echo "Connecting to Redis at 127.0.0.1:6379"
+          timeout 15s redis-cli -c -h 127.0.0.1 -p 6379 DEL latestSdkSourceCode || echo "Failed to delete latestSdkSourceCode"
+
+      - name: Delete Redis latestSdkVersion Key
+        run: |
+          echo "Connecting to Redis at 127.0.0.1:6379"
+          timeout 15s redis-cli -c -h 127.0.0.1 -p 6379 DEL latestSdkVersion || echo "Failed to delete latestSdkVersion"
