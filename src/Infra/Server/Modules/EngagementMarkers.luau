@@ -170,6 +170,8 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			["sdkPlatform"] = "roblox",
 			["origin"] = source,
 			["device"] = nil, -- Resolved later
+			["deviceSubType"] = nil, -- Resolved later
+			["inputType"] = nil, -- Resolved later
 			["position"] = position ~= nil and EncodeVector3(position) or nil,
 			["language"] = player and LocalizationCache:GetLocaleId(player) or nil,
 			["country"] = player and LocalizationCache:GetRegionId(player) or nil,
@@ -191,6 +193,8 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 	if player then -- Ensure marker gets fired with device info on timeout or bind to close
 		local function resolved()
 			entry.properties.device = ServerClientInfoHandler:GetClientInfo(player, "device")
+			entry.properties.deviceSubType = ServerClientInfoHandler:GetClientInfo(player, "deviceSubType")
+			entry.properties.inputType = ServerClientInfoHandler:GetClientInfo(player, "inputType")
 			addMarker()
 		end
 		
