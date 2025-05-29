@@ -29,9 +29,26 @@ type AvailableExperimentsSnapshot = {
 	scheduled: {[string]: {number}},
 }
 type ExperimentReassignmentPropagationRequest = {
-	playerIds: {number},
+	playerIds: {string},
 	gameserverIds: {string},
 }
+
+type BaseAssignmentResponse = {
+	groups: {AvailableExperimentGroupSnapshot}?,
+}
+type GameserverAssignmentResponse = BaseAssignmentResponse & {
+	targetType: "gameserver",
+	gameserverGroupId: number?,
+}
+type PlayerAssignmentResponse = BaseAssignmentResponse & {
+	targetType: "player",
+	playerIdsByGroupId: {[string]: {string}},
+}
+type EmptyAssignmentResponse = nil
+type AssignmentResponse =
+	| GameserverAssignmentResponse
+	| PlayerAssignmentResponse
+	| EmptyAssignmentResponse
 
 --[[
 	How long to wait before requesting bulk assignment after calling `queueAssignment()`.
@@ -224,8 +241,9 @@ function Experiments:ProcessExperimentReassignmentRequest(request: ExperimentRea
 	end
 
 	-- If players in the server are included in the request, queue them for reassignment
-	for _, playerId in request.playerIds do
-		local player = Players:GetPlayerByUserId(playerId)
+	for _, playerIdString in request.playerIds do
+		local playerId = tonumber(playerIdString)
+		local player = playerId and Players:GetPlayerByUserId(playerId)
 		if player then
 			Utilities.GBLog("Queueing reassignment as requested for player:", player.Name)
 			queueAssignment({ player })
@@ -377,34 +395,36 @@ function executeAssignmentRequest()
 
 		return
 	end
+	local assignmentResponse = response :: AssignmentResponse
 
 	-- If no experiments are available for assignment, disable assignment
-	if not response then
+	if not assignmentResponse then
 		disableAssignment()
 		return
 	end
 
 	-- Cache new received group snapshots
-	if response.groups then
-		for _, group in response.groups do
+	if assignmentResponse.groups then
+		for _, group in assignmentResponse.groups do
 			initializeActiveGroupState(group)
 			clearUnfetchedActiveGroupState(group.id)
 		end
 	end
 
-	if response.gameserverGroupId then
-		setAssignedServerGroupId(response.gameserverGroupId)
+	if (assignmentResponse.targetType == "gameserver") and assignmentResponse.gameserverGroupId then
+		setAssignedServerGroupId(assignmentResponse.gameserverGroupId)
 
 		-- Clear previous per-player assignments, if any
 		for player in Experiments.AssignedGroupIdByPlayer do
 			setAssignedPlayerGroupId(player, nil)
 		end
 
-	elseif response.playerIdsByGroupId then
-		for groupIdString: string, groupPlayerIds in response.playerIdsByGroupId do
+	elseif (assignmentResponse.targetType == "player") and assignmentResponse.playerIdsByGroupId then
+		for groupIdString, groupPlayerIds in assignmentResponse.playerIdsByGroupId do
 			local groupId = tonumber(groupIdString) :: number
-			for _, playerId in groupPlayerIds do
-				local player = Players:GetPlayerByUserId(playerId)
+			for _, playerIdString in groupPlayerIds do
+				local playerId = tonumber(playerIdString)
+				local player = playerId and Players:GetPlayerByUserId(playerId)
 				if player then
 					setAssignedPlayerGroupId(player, groupId)
 				end
