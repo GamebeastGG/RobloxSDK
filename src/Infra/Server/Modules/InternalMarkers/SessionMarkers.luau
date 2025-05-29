@@ -51,16 +51,21 @@ function SessionMarkers:Init()
 			LastCharPositions[player] = position
 		end)
 		
-		-- Send Login marker with relevant session information
-		local policyInfo = Utilities.promiseReturn(1, function()
-			return PolicyService:GetPolicyInfoForPlayerAsync(player)
-		end)
+		local joinData = player:GetJoinData()
+		-- Check if the player teleported into the game. Only send login marker if they did not teleport in.
+        if joinData.SourceGameId ~= game.GameId then
+            
+            -- Send Login marker with relevant session information
+			local policyInfo = Utilities.promiseReturn(1, function()
+				return PolicyService:GetPolicyInfoForPlayerAsync(player)
+			end)
 
-		local loginArgs = {
-			policyInfo = policyInfo
-		}
+			local loginArgs = {
+				policyInfo = policyInfo
+			}
 
-		EngagementMarkers:SDKMarker("Login", loginArgs, {player = player, position = nil})
+			EngagementMarkers:SDKMarker("Login", loginArgs, {player = player, position = nil})
+        end
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)		
@@ -75,6 +80,12 @@ function SessionMarkers:Init()
 			["sessionLength"] = sessionLength,
 			["sessionLengthPercentageWithFriends"] = if friendPlaytimePercent then Utilities.roundNum(friendPlaytimePercent/sessionLength, 0.01) else nil
 		}
+
+		
+		if PlayerStats:GetStat(player, "teleporting") == true then
+			-- If the player was teleporting, we don't send a Logout marker
+			return
+		end
 
 		-- Send Logout marker with relevant info
 		EngagementMarkers:SDKMarker("Logout", args, {player = player, position = position})

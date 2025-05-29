@@ -27,7 +27,10 @@ local Players = game:GetService("Players")
 local DEFAULT_SCHEMA = {
     session_length = function()
 		return tick()
-	end
+	end,
+    teleporting = function()
+        return false
+    end
 }
 
 --= Variables =--

@@ -16,6 +16,7 @@ local ClientInfoHandler = { }
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
 local UserInputService = game:GetService("UserInputService")
 local VRService = game:GetService("VRService")
 
@@ -29,6 +30,7 @@ local GetRemote = shared.GBMod("GetRemote")
 
 local ClientInfoRemote = GetRemote("Event", "ClientInfoChanged")
 local ClientProductPriceRemote = GetRemote("Function", "GetProductPrice")
+local SessionIdResovedRemote = GetRemote("Event", "SessionIdResolved")
 
 --= Constants =--
 
@@ -93,6 +95,7 @@ end
 --= Initializers =--
 function ClientInfoHandler:Init()
     UpdateClientInfo("device", self:GetDeviceType(), true)
+    UpdateClientInfo("preservedSessionId", TeleportService:GetTeleportSetting("GAMEBEAST_SID") or "")
 
     -- Friends online
     task.spawn(function()
@@ -133,6 +136,13 @@ function ClientInfoHandler:Init()
             return nil
         end
     end
+
+    -- Session ID resolution
+    SessionIdResovedRemote.OnClientEvent:Connect(function(sessionId : string)
+        if sessionId and sessionId ~= "" then
+            TeleportService:SetTeleportSetting("GAMEBEAST_SID", sessionId)
+        end
+    end)
 end
 
 --= Return Module =--

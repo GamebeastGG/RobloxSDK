@@ -102,6 +102,14 @@ function SocialHandler:Init()
             end
         end)
 
+        player.OnTeleport:Connect(function(teleportState)
+            if teleportState == Enum.TeleportState.Started then
+                PlayerStats:SetStat(player, "teleporting", true)
+            elseif teleportState == Enum.TeleportState.Failed then
+                PlayerStats:SetStat(player, "teleporting", false)
+            end
+        end)
+
         --NOTE: Disabled since large servers with lots of players joining will result in too many HTTP requests.
         --[[ Look for friends
         for _, potentialFriend in ipairs(Players:GetPlayers()) do
@@ -137,6 +145,7 @@ function SocialHandler:Init()
         end
     end)
 
+    
 end
 
 --= Return Module =--

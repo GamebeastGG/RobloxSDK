@@ -33,6 +33,7 @@ local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@modu
 
 --= Object References =--
 
+local SessionIdResovedRemote = GetRemote("Event", "SessionIdResolved")
 local FireMarkerEvent = GetRemote("Event", "FireMarker")
 
 --= Constants =--
@@ -42,7 +43,6 @@ local MAX_EVENT_QUEUE_SIZE = 1000
 local QUEUE_CHECK_TIME = 5
 local MAX_EVENT_REPORT_TIME = 10
 local SYSTEM_MARKERS = {
-	["Died"] = true,
 	["Logout"] = true,
 	["Login"] = true,
 	["Purchase"] = true,
@@ -84,6 +84,7 @@ local ExperimentGroupIdByPlayer = {} :: {[Player]: number}
 local function GetSessionIdForPlayer(player) : string?
 	if SessionIds[player] == nil and player.Parent then
 		SessionIds[player] = HttpService:GenerateGUID(false)
+		SessionIdResovedRemote:FireClient(player, SessionIds[player])
 	end
 
 	return SessionIds[player]
@@ -164,7 +165,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		["timestamp"] = metaData.timestampOverride or DateTime.now().UnixTimestampMillis,
 		["type"] = markerType,
 		["userId"] = player and player.UserId, 
-		["sessionId"] = player and GetSessionIdForPlayer(player),
+		["sessionId"] = nil, -- Resolved later
 		["value"] = value,
 		["properties"] = {
 			["sdkPlatform"] = "roblox",
@@ -191,6 +192,18 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 	if player then -- Ensure marker gets fired with device info on timeout or bind to close
 		local function resolved()
 			entry.properties.device = ServerClientInfoHandler:GetClientInfo(player, "device")
+
+			-- Attempt to resolve session ID from client info so we preserve it across game sessions.
+			local preservedSessionId = ServerClientInfoHandler:GetClientInfo(player, "preservedSessionId")
+			if preservedSessionId and preservedSessionId ~= "" then
+				entry.sessionId = preservedSessionId
+				if player.Parent then
+					SessionIds[player] = preservedSessionId
+				end
+			else
+				entry.sessionId = GetSessionIdForPlayer(player)
+			end
+
 			addMarker()
 		end
 		
