@@ -30,8 +30,9 @@ local Utilities = shared.GBMod("Utilities") ---@module Utilities
 -- Messaging service topics for cross server communication
 local HOST_HEARTBEAT_TOPIC = "GB_HOST_HEARTBEAT"
 local SERVER_SHUTDOWN_TOPIC = "GB_SERVER_SHUTDOWN"
+local SERVER_STARTUP_TOPIC = "GB_SERVER_STARTUP"
 -- How often we check if no host exists and resolve
-local HEARTBEAT_INTERVAL = 30
+local HEARTBEAT_INTERVAL = 10
 
 --= Variables =--
 
@@ -51,9 +52,9 @@ local function assumeHostServerRole()
 	HostServerStatus = true
 end
 
-local function SendHeartbeat(newFlag : boolean?)
+local function SendHeartbeat()
 	LastHeartbeatSent = os.time()
-	Utilities.publishMessage(HOST_HEARTBEAT_TOPIC, {Source = game.JobId, NewServer = newFlag})
+	Utilities.publishMessage(HOST_HEARTBEAT_TOPIC, {Source = game.JobId})
 end
 
 --= API Functions =--
@@ -68,17 +69,16 @@ function HostServer:RelinquishHostServerRole()
 	HostServerStatus = false
 end
 
--- Sends out signal to see if the host server responds. If no response, attempts to assume host server role
-function HostServer:CheckHostServerActive(isNew : boolean?)
+-- If no response, attempts to assume host server role
+function HostServer:CheckHostServerActive()
 	if HostServerStatus then
 		return
 	end
 
 	OtherHostFound = false
 
-	SendHeartbeat(isNew)
-	task.wait(2)
-	
+	task.wait(HEARTBEAT_INTERVAL + 2) -- Wait a bit to see if we get a response from an active host server
+
 	if not OtherHostFound then
 		assumeHostServerRole()
 	end
@@ -94,28 +94,24 @@ function HostServer:Init()
 
 	-- If ping is received on this channel and it is not from ourself, then another host server exists and we relinquish role
 	local success, reason = pcall(function()
-		MessagingService:SubscribeAsync(HOST_HEARTBEAT_TOPIC, function(message : {Sent : number, Data : {Source : string, NewServer : boolean?}})
+		MessagingService:SubscribeAsync(HOST_HEARTBEAT_TOPIC, function(message : {Sent : number, Data : {Source : string}})
 			if message.Data.Source == game.JobId then return end
 
 			LastHeartbeatTick = tick()
 			--print("New host server found: ".. message.Data)
-
+			OtherHostFound = true
 			if message.Data.Source > game.JobId then -- If other server should be host
 				self:RelinquishHostServerRole()
-				OtherHostFound = true
-			elseif HostServerStatus then -- If we are host
-				--Check timestamp, dont reply to any that are older than last heartbeat
-				if message.Sent > LastHeartbeatSent then
-					SendHeartbeat()
-				end
-			end
-
-			if message.Data.NewServer then
-				ServersSinceStartup += 1
 			end
 		end)
 	end)
 	
+	Utilities.promiseReturn(1, function()
+		MessagingService:SubscribeAsync(SERVER_STARTUP_TOPIC, function()
+			ServersSinceStartup += 1
+		end)
+	end)
+
 	Utilities.promiseReturn(1, function()
 		MessagingService:SubscribeAsync(SERVER_SHUTDOWN_TOPIC, function(message)
 			if message.Data < ServersSinceStartup then
@@ -130,11 +126,9 @@ function HostServer:Init()
 				SendHeartbeat()
 			elseif tick() - LastHeartbeatTick > ((HEARTBEAT_INTERVAL + 5) + ServersSinceStartup) then -- Non-host
 				LastHeartbeatTick = tick()
-				self:CheckHostServerActive()
+				assumeHostServerRole()
 			end
 		end)
-
-		self:CheckHostServerActive(true)
 
 		game:BindToClose(function(reason)
 			if reason == Enum.CloseReason.DeveloperShutdown or reason == Enum.CloseReason.DeveloperUpdate then
@@ -143,8 +137,11 @@ function HostServer:Init()
 
 			Utilities.publishMessage(SERVER_SHUTDOWN_TOPIC, ServersSinceStartup)
 		end)
+
+		Utilities.publishMessage(SERVER_STARTUP_TOPIC, true)
+		self:CheckHostServerActive()
 	else
-		Utilities.GBWarn("Failed to subscribe to host heartbeat topic, starting rogue host server...", reason)
+		Utilities.GBWarn("Failed to subscribe to host heartbeat topic, starting rogue host server with reason: ".. reason)
 		assumeHostServerRole()
 	end
 end
