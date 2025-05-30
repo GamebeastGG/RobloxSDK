@@ -61,21 +61,19 @@ function ServerClientInfoHandler:GetClientInfo(player : Player | number, key : s
     return ClientInfoCache[player][key]
 end
 
-function ServerClientInfoHandler:OnClientInfoResolved(player : Player, timeoutSeconds : number, callback : (timedout : boolean, info : { [string] : any }) -> nil)
+function ServerClientInfoHandler:GetDefaultInfo()
+    return table.clone(DEFAULT_INFO)
+end
+
+function ServerClientInfoHandler:OnClientInfoResolved(player : Player, callback : (info : { [string] : any }) -> nil)
     if ClientInfoCache[player] then
-        callback(false, table.clone(ClientInfoCache[player]))
+        callback(table.clone(ClientInfoCache[player]))
         return
     end
 
-    local timeout = SignalTimeout.new(timeoutSeconds, ClientInfoResolvedSignal, function(resolvedPlayer : Player)
-        return resolvedPlayer == player
-    end)
-
-    return timeout:Once(function(timedout : boolean, _, info : { [string] : any }?)
-        if timedout or not info then
-            callback(true, table.clone(DEFAULT_INFO))
-        elseif info then
-            callback(false, table.clone(info))
+    return ClientInfoResolvedSignal:Connect(function(resolvedPlayer : Player, clientInfo : { [string] : any })
+        if resolvedPlayer == player then
+            callback(table.clone(clientInfo))
         end
     end)
 end

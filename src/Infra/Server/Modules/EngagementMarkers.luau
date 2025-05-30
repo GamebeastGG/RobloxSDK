@@ -20,6 +20,8 @@ local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
+local Timer = shared.GBMod("Timer") ---@module Timer
+local Cleaner = shared.GBMod("Cleaner")
 local MetaData = shared.GBMod("MetaData")
 local GetRemote = shared.GBMod("GetRemote")
 local Utilities = shared.GBMod("Utilities")
@@ -172,97 +174,89 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		end
 	end
 
-	-- Keep track of number of pending property data fetches holding back marker sending
-	local pendingMarkerDataRequests = 0
-	local function resolve()
-		pendingMarkerDataRequests -= 1
-		if pendingMarkerDataRequests == 0 then
-			addMarker()
+	--[[
+		Ensure markers are sent with all required data.
+	]]
+
+	local pendingMarkerData = {
+		pendingCleaner = Cleaner.new(),
+		tasks = {},
+		activeTasks = 0,
+		resolved = nil,
+	}
+
+	local function resolved(shutdown : boolean?)
+		pendingMarkerData.pendingCleaner:Clean()
+
+		-- Add any final missing data to the marker
+		entry.properties.device = ServerClientInfoHandler:GetClientInfo(player, "device")
+		addMarker()
+
+		-- Remove from waiting list if it exists
+		if not shutdown then
+			local index = table.find(WaitingPlayerMarkers, pendingMarkerData)
+			if index then
+				table.remove(WaitingPlayerMarkers, index)
+			end
 		end
 	end
 
-	if player then -- Ensure marker gets fired with device info on timeout or bind to close
-		local function resolved()
-			entry.properties.device = ServerClientInfoHandler:GetClientInfo(player, "device")
-			task.defer(resolve)
+	pendingMarkerData.resolved = resolved
+
+	-- Task manager
+
+	-- Will only add tasks if they arent already finished and the connection is still active.
+	local function addTask(taskName : string, connection : RBXScriptConnection?)
+		if not pendingMarkerData.tasks[taskName] and connection ~= nil and connection.Connected == true then
+			pendingMarkerData.activeTasks += 1
+			pendingMarkerData.tasks[taskName] = connection
+
+			if connection then
+				pendingMarkerData.pendingCleaner:Add(connection)
+			end
 		end
+	end
 
-		pendingMarkerDataRequests += 1
+	local function completeTask(taskName : string)
+		if pendingMarkerData.tasks[taskName] then
+			pendingMarkerData.tasks[taskName] = nil
+			pendingMarkerData.activeTasks -= 1
 
-		local preShutdownHook: (() -> ())? = nil
-		local connection = ServerClientInfoHandler:OnClientInfoResolved(player, CLIENT_DATA_TIMEOUT, function(timedout, ...)
-			if timedout and ClientInfoWarned == false then
-				Utilities.GBWarn("Failed to resolve client info, did you forget to :Setup() Gamebeast SDK on the client?")
-				ClientInfoWarned = true
-			end
-
-			if preShutdownHook then
-				WaitingPlayerMarkers[preShutdownHook] = nil
-			end
-
-			resolved()
-		end)
-		if connection then
-			preShutdownHook = function ()
-				connection:Disconnect()
+			if pendingMarkerData.activeTasks <= 0 then
 				resolved()
 			end
-			WaitingPlayerMarkers[preShutdownHook] = true
 		end
 	end
 
-	-- If an experiment assignment was not immediately found, wait for it (if applicable)
+	-- Stop wating after some time if tasks are not resolved
+	local dataFetchTimer = Timer.new(CLIENT_DATA_TIMEOUT)
+	pendingMarkerData.pendingCleaner:Add(dataFetchTimer)
+	pendingMarkerData.pendingCleaner:Add(dataFetchTimer:OnEnd(function()
+		if not ServerClientInfoHandler:IsClientInfoResolved(player) and ClientInfoWarned == false then
+			Utilities.GBWarn("Failed to resolve client info, did you forget to :Setup() Gamebeast SDK on the client?")
+			ClientInfoWarned = true
+		end
+
+		resolved()
+	end))
+
+	if player then -- Ensure marker gets fired with device info on timeout or bind to close
+		addTask("clientInfo", ServerClientInfoHandler:OnClientInfoResolved(player, function()
+			completeTask("clientInfo")
+		end))
+	end
+
 	if entry.properties.experimentGroupId == nil then
-		pendingMarkerDataRequests += 1
-
-		local timeoutThread: thread
-		local cancelListener: () -> ()
-		local preShutdownHook = function ()
-			task.cancel(timeoutThread)
-			cancelListener()
-			task.defer(resolve)
-		end
-		WaitingPlayerMarkers[preShutdownHook] = true
-
-		timeoutThread = task.delay(CLIENT_DATA_TIMEOUT, function ()
-			WaitingPlayerMarkers[preShutdownHook] = nil
-			cancelListener()
-			task.defer(resolve)
-		end)
-
-		local isListeningCancelled = false
-		cancelListener = function ()
-			isListeningCancelled = true
-		end
-		task.spawn(function ()
-			InternalConfigs:WaitForConfigsReady()
-			if isListeningCancelled then
-				return
-			end
-
-			-- If waiting for server assignment, check now
-			if not player then
-				entry.properties.experimentGroupId = Experiments.AssignedServerGroupId
-
-				task.cancel(timeoutThread)
-				WaitingPlayerMarkers[preShutdownHook] = nil
-				task.defer(resolve)
-				return
-			end
-
-			-- If waiting for player assignment, listen for change
-			cancelListener = Experiments:ListenForPlayerAssignment(player, function (groupId: number?)
-				entry.properties.experimentGroupId = groupId
-
-				task.cancel(timeoutThread)
-				WaitingPlayerMarkers[preShutdownHook] = nil
-				task.defer(resolve)
-			end)
-		end)
+		addTask("experimentGroup", Experiments:ListenForPlayerAssignment(player, function (groupId: number?)
+			entry.properties.experimentGroupId = groupId
+			completeTask("experimentGroup")
+		end))
 	end
 
-	if pendingMarkerDataRequests == 0 then
-		addMarker()
+	if pendingMarkerData.activeTasks <= 0 then
+		resolved()
+	else
+		table.insert(WaitingPlayerMarkers, pendingMarkerData)
 	end
 end
 
@@ -318,8 +312,8 @@ function EngagementMarkers:Init()
 	end)
 
 	GBRequests:OnFinalRequestCall(function()
-		for callback in WaitingPlayerMarkers do
-			callback()
+		for _, data in WaitingPlayerMarkers do
+			data.resolved(true)
 		end
 
 		EngagementMarkers:SendMarkers()
