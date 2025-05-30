@@ -35,7 +35,9 @@ local ClientInfoChangedSignal = Signal.new()
 --= Constants =--
 
 local DEFAULT_INFO = {
-    device = "unknown",
+    inputType = "unknown" :: "keyboard" | "gamepad" | "touch" | "unknown",
+    device = "unknown" :: "desktop" | "mobile" | "console" | "vr" | "unknown",
+    deviceSubType = "unknown" :: "tablet" | "phone" | "xbox" | "playstation" | "unknown",
     friendsOnline = 0,
 }
 
@@ -125,23 +127,27 @@ function ServerClientInfoHandler:Init()
         ClientInfoCache[player] = nil
     end)
 
-    ClientInfoRemote.OnServerEvent:Connect(function(player : Player, updatedKey : string, updatedValue : any)
-        if not updatedKey or not updatedValue then
-            return
-        end
-
-        if DEFAULT_INFO[updatedKey] == nil then
-            return
-        end
-
+    ClientInfoRemote.OnServerEvent:Connect(function(player : Player, updatedInfo : { [string] : any })
+       
         local isNew = false
         if not ClientInfoCache[player] then
             ClientInfoCache[player] = table.clone(DEFAULT_INFO)
             isNew = true
         end
 
-        ClientInfoCache[player][updatedKey] = updatedValue
-        ClientInfoChangedSignal:Fire(player, updatedKey, updatedValue)
+        for updatedKey, updatedValue in pairs(updatedInfo) do
+            if DEFAULT_INFO[updatedKey] == nil then
+                return
+            end
+
+            local currentValue = ClientInfoCache[player][updatedKey]
+            if currentValue == updatedValue then
+                continue
+            end
+
+            ClientInfoCache[player][updatedKey] = updatedValue
+            ClientInfoChangedSignal:Fire(player, updatedKey, updatedValue)
+        end
 
         if isNew then
             ClientInfoResolvedSignal:Fire(player, ClientInfoCache[player])
