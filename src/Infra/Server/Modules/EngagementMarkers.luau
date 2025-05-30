@@ -185,79 +185,81 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		resolved = nil,
 	}
 
-	local function resolved(shutdown : boolean?)
-		pendingMarkerData.pendingCleaner:Clean()
+	InternalConfigs:OnReady(function()
+		local function resolved(shutdown : boolean?)
+			pendingMarkerData.pendingCleaner:Clean()
 
-		-- Add any final missing data to the marker
-		entry.properties.device = ServerClientInfoHandler:GetClientInfo(player, "device")
-		addMarker()
+			-- Add any final missing data to the marker
+			entry.properties.device = ServerClientInfoHandler:GetClientInfo(player, "device")
+			addMarker()
 
-		-- Remove from waiting list if it exists
-		if not shutdown then
-			local index = table.find(WaitingPlayerMarkers, pendingMarkerData)
-			if index then
-				table.remove(WaitingPlayerMarkers, index)
+			-- Remove from waiting list if it exists
+			if not shutdown then
+				local index = table.find(WaitingPlayerMarkers, pendingMarkerData)
+				if index then
+					table.remove(WaitingPlayerMarkers, index)
+				end
 			end
 		end
-	end
 
-	pendingMarkerData.resolved = resolved
+		pendingMarkerData.resolved = resolved
 
-	-- Task manager
+		-- Task manager
 
-	-- Will only add tasks if they arent already finished and the connection is still active.
-	local function addTask(taskName : string, connection : RBXScriptConnection?)
-		if not pendingMarkerData.tasks[taskName] and connection ~= nil and connection.Connected == true then
-			pendingMarkerData.activeTasks += 1
-			pendingMarkerData.tasks[taskName] = connection
+		-- Will only add tasks if they arent already finished and the connection is still active.
+		local function addTask(taskName : string, connection : RBXScriptConnection?)
+			if not pendingMarkerData.tasks[taskName] and connection ~= nil and connection.Connected == true then
+				pendingMarkerData.activeTasks += 1
+				pendingMarkerData.tasks[taskName] = connection
 
-			if connection then
-				pendingMarkerData.pendingCleaner:Add(connection)
+				if connection then
+					pendingMarkerData.pendingCleaner:Add(connection)
+				end
 			end
 		end
-	end
 
-	local function completeTask(taskName : string)
-		if pendingMarkerData.tasks[taskName] then
-			pendingMarkerData.tasks[taskName] = nil
-			pendingMarkerData.activeTasks -= 1
+		local function completeTask(taskName : string)
+			if pendingMarkerData.tasks[taskName] then
+				pendingMarkerData.tasks[taskName] = nil
+				pendingMarkerData.activeTasks -= 1
 
-			if pendingMarkerData.activeTasks <= 0 then
-				resolved()
+				if pendingMarkerData.activeTasks <= 0 then
+					resolved()
+				end
 			end
 		end
-	end
 
-	-- Stop wating after some time if tasks are not resolved
-	local dataFetchTimer = Timer.new(CLIENT_DATA_TIMEOUT)
-	pendingMarkerData.pendingCleaner:Add(dataFetchTimer)
-	pendingMarkerData.pendingCleaner:Add(dataFetchTimer:OnEnd(function()
-		if not ServerClientInfoHandler:IsClientInfoResolved(player) and ClientInfoWarned == false then
-			Utilities.GBWarn("Failed to resolve client info, did you forget to :Setup() Gamebeast SDK on the client?")
-			ClientInfoWarned = true
-		end
+		-- Stop wating after some time if tasks are not resolved
+		local dataFetchTimer = Timer.new(CLIENT_DATA_TIMEOUT)
+		pendingMarkerData.pendingCleaner:Add(dataFetchTimer)
+		pendingMarkerData.pendingCleaner:Add(dataFetchTimer:OnEnd(function()
+			if not ServerClientInfoHandler:IsClientInfoResolved(player) and ClientInfoWarned == false then
+				Utilities.GBWarn("Failed to resolve client info, did you forget to :Setup() Gamebeast SDK on the client?")
+				ClientInfoWarned = true
+			end
 
-		resolved()
-	end))
-
-	if player then -- Ensure marker gets fired with device info on timeout or bind to close
-		addTask("clientInfo", ServerClientInfoHandler:OnClientInfoResolved(player, function()
-			completeTask("clientInfo")
+			resolved()
 		end))
-	end
 
-	if entry.properties.experimentGroupId == nil then
-		addTask("experimentGroup", Experiments:ListenForPlayerAssignment(player, function (groupId: number?)
-			entry.properties.experimentGroupId = groupId
-			completeTask("experimentGroup")
-		end))
-	end
+		if player then -- Ensure marker gets fired with device info on timeout or bind to close
+			addTask("clientInfo", ServerClientInfoHandler:OnClientInfoResolved(player, function()
+				completeTask("clientInfo")
+			end))
+		end
 
-	if pendingMarkerData.activeTasks <= 0 then
-		resolved()
-	else
-		table.insert(WaitingPlayerMarkers, pendingMarkerData)
-	end
+		if entry.properties.experimentGroupId == nil then
+			addTask("experimentGroup", Experiments:ListenForPlayerAssignment(player, function (groupId: number?)
+				entry.properties.experimentGroupId = groupId
+				completeTask("experimentGroup")
+			end))
+		end
+
+		if pendingMarkerData.activeTasks <= 0 then
+			resolved()
+		else
+			table.insert(WaitingPlayerMarkers, pendingMarkerData)
+		end
+	end)
 end
 
 -- Fire an engagement marker. Used by devs via API module, wraps createMarker to declare source.
