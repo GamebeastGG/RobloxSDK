@@ -215,14 +215,6 @@ function Updater:Init()
 		end
 	end
 
-	-- Update marker properties when experiments are running
-	Experiments.OnServerGroupIdChanged:Connect(function (groupId)
-		EngagementMarkers:SetServerExperimentGroupId(groupId)
-	end)
-	Experiments.OnPlayerGroupIdChanged:Connect(function (player, groupId)
-		EngagementMarkers:SetPlayerExperimentGroupId(player, groupId)
-	end)
-
 	-- Update configs for server with initialization flag
 	self:UpdateConfigs(newConfigs, true)
 

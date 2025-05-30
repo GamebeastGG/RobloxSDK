@@ -27,7 +27,7 @@ local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
 local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
 local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
-
+local Experiments = shared.GBMod("Experiments") ---@module Experiments
 
 --= Types =--
 
@@ -59,22 +59,6 @@ local MarkerQueue = {}
 local SessionIds = {}
 local LastEventReportTime = 0
 local ClientInfoWarned = false
-
---[[
-	When set, this is included in each marker's `experimentGroupId` property.
-
-	Set through `EngagementMarkers:SetServerExperimentGroupId()` based on the
-	group ID currently assigned to the server in an experiment, if any.
-]]
-local GameserverExperimentGroupId = nil :: number?
-
---[[
-	When set, these are included in the `experimentGroupId` property of the player's markers.
-
-	Set through `EngagementMarkers:SetPlayerExperimentGroupId()` based on the
-	group ID currently assigned to the player in an experiment, if any.
-]]
-local ExperimentGroupIdByPlayer = {} :: {[Player]: number}
 
 
 --= Public Variables =--
@@ -174,8 +158,8 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			["language"] = player and LocalizationCache:GetLocaleId(player) or nil,
 			["country"] = player and LocalizationCache:GetRegionId(player) or nil,
 			["experimentGroupId"] = player
-				and ExperimentGroupIdByPlayer[player]
-				or GameserverExperimentGroupId,
+				and Experiments.AssignedGroupIdByPlayer[player]
+				or Experiments.AssignedServerGroupId,
 		},
 	}
 
@@ -187,39 +171,97 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			EngagementMarkers:SendMarkers()
 		end
 	end
-	
+
+	-- Keep track of number of pending property data fetches holding back marker sending
+	local pendingMarkerDataRequests = 0
+	local function resolve()
+		pendingMarkerDataRequests -= 1
+		if pendingMarkerDataRequests == 0 then
+			addMarker()
+		end
+	end
+
 	if player then -- Ensure marker gets fired with device info on timeout or bind to close
 		local function resolved()
 			entry.properties.device = ServerClientInfoHandler:GetClientInfo(player, "device")
-			addMarker()
+			task.defer(resolve)
 		end
-		
-		local waitingData = {
-			callback = resolved,
-			connection = nil
-		}
 
+		pendingMarkerDataRequests += 1
+
+		local preShutdownHook: (() -> ())? = nil
 		local connection = ServerClientInfoHandler:OnClientInfoResolved(player, CLIENT_DATA_TIMEOUT, function(timedout, ...)
 			if timedout and ClientInfoWarned == false then
 				Utilities.GBWarn("Failed to resolve client info, did you forget to :Setup() Gamebeast SDK on the client?")
 				ClientInfoWarned = true
 			end
 
-			local index = table.find(WaitingPlayerMarkers, waitingData)
-			if index then
-				table.remove(WaitingPlayerMarkers, index)
+			if preShutdownHook then
+				WaitingPlayerMarkers[preShutdownHook] = nil
 			end
 
 			resolved()
 		end)
-
-		if not connection then
-			return
+		if connection then
+			preShutdownHook = function ()
+				connection:Disconnect()
+				resolved()
+			end
+			WaitingPlayerMarkers[preShutdownHook] = true
 		end
+	end
 
-		waitingData.connection = connection
-		table.insert(WaitingPlayerMarkers, waitingData)
-	else
+	-- If an experiment assignment was not immediately found, wait for it (if applicable)
+	if entry.properties.experimentGroupId == nil then
+		pendingMarkerDataRequests += 1
+
+		local timeoutThread: thread
+		local cancelListener: () -> ()
+		local preShutdownHook = function ()
+			task.cancel(timeoutThread)
+			cancelListener()
+			task.defer(resolve)
+		end
+		WaitingPlayerMarkers[preShutdownHook] = true
+
+		timeoutThread = task.delay(CLIENT_DATA_TIMEOUT, function ()
+			WaitingPlayerMarkers[preShutdownHook] = nil
+			cancelListener()
+			task.defer(resolve)
+		end)
+
+		local isListeningCancelled = false
+		cancelListener = function ()
+			isListeningCancelled = true
+		end
+		task.spawn(function ()
+			InternalConfigs:WaitForConfigsReady()
+			if isListeningCancelled then
+				return
+			end
+
+			-- If waiting for server assignment, check now
+			if not player then
+				entry.properties.experimentGroupId = Experiments.AssignedServerGroupId
+
+				task.cancel(timeoutThread)
+				WaitingPlayerMarkers[preShutdownHook] = nil
+				task.defer(resolve)
+				return
+			end
+
+			-- If waiting for player assignment, listen for change
+			cancelListener = Experiments:ListenForPlayerAssignment(player, function (groupId: number?)
+				entry.properties.experimentGroupId = groupId
+
+				task.cancel(timeoutThread)
+				WaitingPlayerMarkers[preShutdownHook] = nil
+				task.defer(resolve)
+			end)
+		end)
+	end
+
+	if pendingMarkerDataRequests == 0 then
 		addMarker()
 	end
 end
@@ -237,22 +279,6 @@ end
 
 function EngagementMarkers:ClearSessionId(player : Player)
 	SessionIds[player] = nil
-end
-
---[[
-	Sets the assigned experiment group ID to be included in the `experimentGroupId`
-	property of the player's markers.
-]]
-function EngagementMarkers:SetPlayerExperimentGroupId(player: Player, groupId: number?)
-	ExperimentGroupIdByPlayer[player] = groupId
-end
-
---[[
-	Sets the assigned experiment group ID to be included in the `experimentGroupId`
-	property of the server's markers.
-]]
-function EngagementMarkers:SetServerExperimentGroupId(groupId: number?)
-	GameserverExperimentGroupId = groupId
 end
 
 --= Initializers =--
@@ -292,9 +318,8 @@ function EngagementMarkers:Init()
 	end)
 
 	GBRequests:OnFinalRequestCall(function()
-		for _, waiting in WaitingPlayerMarkers do
-			waiting.connection:Disconnect()
-			waiting.callback()
+		for callback in WaitingPlayerMarkers do
+			callback()
 		end
 
 		EngagementMarkers:SendMarkers()

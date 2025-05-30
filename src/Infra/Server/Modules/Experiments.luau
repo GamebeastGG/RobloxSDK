@@ -114,6 +114,8 @@ Experiments.OnAssignedPlayerConfigChanged = Signal.new()
 
 Experiments.CanonicalServerConfig = nil :: ConfigSnapshot?
 
+Experiments.OnAssignmentDisabling = Signal.new()
+
 --[[
 	Updates whether assignments are being requested or not, based on the given
 	snapshots of available experiments received from the backend.
@@ -252,6 +254,76 @@ function Experiments:ProcessExperimentReassignmentRequest(request: ExperimentRea
 end
 
 --[[
+	Calls `callback` with the experiment group ID applied to a player once it's known.
+	If assignment is disabled, or the player leaves, this may be `nil`.
+
+	Returns a function to cancel listening.
+]]
+function Experiments:ListenForPlayerAssignment(player: Player, callback: (groupId: number?) -> ()): () -> ()
+
+	-- If assignment is not enabled, immediately return nil
+	if not currentAssignmentState then
+		task.spawn(callback, nil)
+		return function () end
+	end
+
+	-- If server is assigned, return the assigned group ID
+	if Experiments.AssignedServerGroupId then
+		task.spawn(callback, Experiments.AssignedServerGroupId)
+		return function () end
+	end
+
+	-- If player is assigned, return the assigned group ID
+	if Experiments.AssignedGroupIdByPlayer[player] then
+		task.spawn(callback, Experiments.AssignedGroupIdByPlayer[player])
+		return function () end
+	end
+
+	-- If player has not been assigned, wait for assignment
+	local playerAssignmentListener: RBXScriptConnection
+	local serverAssignmentListener: RBXScriptConnection
+	local assignmentDisablingListener: RBXScriptConnection
+	local playerLeaveListener: RBXScriptConnection
+	local function stopListening()
+		playerAssignmentListener:Disconnect()
+		serverAssignmentListener:Disconnect()
+		assignmentDisablingListener:Disconnect()
+		playerLeaveListener:Disconnect()
+	end
+
+	local didResolve = false
+	local function resolve(groupId: number?)
+		if not didResolve then
+			didResolve = true
+			stopListening()
+			task.spawn(callback, groupId)
+		end
+	end
+
+	-- Wait for assignment to change for player or server, or for it to be disabled
+	playerAssignmentListener = Experiments.OnPlayerGroupIdChanged:Connect(function (changedPlayer: Player, newGroupId: number?)
+		if (changedPlayer == player) and newGroupId then
+			resolve(newGroupId)
+		end
+	end)
+	serverAssignmentListener = Experiments.OnServerGroupIdChanged:Connect(function (newGroupId: number?)
+		if newGroupId then
+			resolve(newGroupId)
+		end
+	end)
+	assignmentDisablingListener = Experiments.OnAssignmentDisabling:Connect(function ()
+		resolve(nil)
+	end)
+	playerLeaveListener = Players.PlayerRemoving:Connect(function (leavingPlayer: Player)
+		if leavingPlayer == player then
+			resolve(nil)
+		end
+	end)
+
+	return stopListening
+end
+
+--[[
 	Starts requesting experiment assignments for players and the server.
 
 	Called when the game receives GB configs and becomes aware of available
@@ -297,6 +369,8 @@ function disableAssignment()
 	if not currentAssignmentState then
 		return
 	end
+
+	Experiments.OnAssignmentDisabling:Fire()
 
 	-- Clear current assignments
 	setAssignedServerGroupId(nil)
