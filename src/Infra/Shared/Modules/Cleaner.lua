@@ -48,7 +48,6 @@ function Cleaner:Add(object : Instance | RBXScriptConnection | {Destroy : () -> 
     table.insert(self._toClean, object)
 end
 
-Cleaner.Clean = Cleaner.Destroy
 function Cleaner:Destroy()
     for _, object in ipairs(self._toClean) do
         if typeof(object) == "RBXScriptConnection" then
@@ -58,5 +57,7 @@ function Cleaner:Destroy()
         end
     end
 end
+
+Cleaner.Clean = Cleaner.Destroy
 
 return Cleaner
