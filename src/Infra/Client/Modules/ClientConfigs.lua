@@ -75,10 +75,11 @@ function ClientConfigs:Get(path : string | { string }, _configs : any?)
 	
     local target = _configs or CachedConfigs
 	for _, key in path do
-        if not target[key] then
+        target = target[key]
+
+        if target == nil then
             return nil
         end
-        target = target[key]
     end
 
 	return target
