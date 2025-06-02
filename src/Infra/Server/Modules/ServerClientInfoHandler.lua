@@ -36,7 +36,7 @@ local ClientInfoChangedSignal = Signal.new()
 
 local DEFAULT_INFO = {
     inputType = "unknown" :: "keyboard" | "gamepad" | "touch" | "unknown",
-    device = "unknown" :: "desktop" | "mobile" | "console" | "vr" | "unknown",
+    device = "unknown" :: "pc" | "mobile" | "console" | "vr" | "unknown",
     deviceSubType = "unknown" :: "tablet" | "phone" | "xbox" | "playstation" | "unknown",
     friendsOnline = 0,
 }
