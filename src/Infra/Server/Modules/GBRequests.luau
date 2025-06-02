@@ -133,7 +133,7 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 	}
 
 	-- JobId is undefined in studio so send a hard coded default for this environment
-	if isStudio == true then
+	if isStudio then
 		headers["serverid"] = "00000000-0000-0000-0000-000000000000"
 	else
 		headers["serverid"] = game.JobId
