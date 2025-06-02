@@ -39,7 +39,7 @@ local CurrentClientInfoCache = {} :: {[string] : any}
 local FriendCache = {} :: {[number] : boolean}
 local FriendsOnline = 0
 local PendingUpdate = false
-local CurrentInputType = "keyboard" -- Default input type
+local CurrentInputType = nil
 
 --= Public Variables =--
 
