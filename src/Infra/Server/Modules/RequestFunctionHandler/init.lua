@@ -204,7 +204,7 @@ function RequestFunctionHandler:ExecuteRequests(requests : {})
                     end
 
                     -- Either run relevant function in its own thread or (potentially) yield and run sequentially as determined by request details
-                    if request.details.async then
+                    if request.details.async or request.details.custom then
                         task.spawn(performRequest)
                     else
                         performRequest()
