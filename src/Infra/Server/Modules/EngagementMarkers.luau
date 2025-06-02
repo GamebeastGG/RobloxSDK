@@ -154,6 +154,8 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		["value"] = value,
 		["properties"] = {
 			["sdkPlatform"] = "roblox",
+			["placeId"] = game.PlaceId,
+			["placeVersion"] = game.PlaceVersion,
 			["origin"] = source,
 			["device"] = nil, -- Resolved later
 			["deviceSubType"] = nil, -- Resolved later
