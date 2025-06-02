@@ -130,6 +130,8 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 		["isstudio"] = tostring(isStudio),
 		["sdkversion"] = MetaData.version,
 		["universeid"] = tostring(game.GameId),
+		["placeid"] = tostring(game.PlaceId),
+		["placeversion"] = tostring(game.PlaceVersion)
 	}
 
 	-- JobId is undefined in studio so send a hard coded default for this environment
