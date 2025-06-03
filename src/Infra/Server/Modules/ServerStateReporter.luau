@@ -66,11 +66,11 @@ local function AggregateMetric(metricHistory: {number})
         max = max,
         sum = sum,
         average = sum / #metricHistory,
-        median = metricHistory[math.floor(#metricHistory / 2)],
-        p25 = metricHistory[math.floor(#metricHistory * 0.25)],
-        p75 = metricHistory[math.floor(#metricHistory * 0.75)],
-        p90 = metricHistory[math.floor(#metricHistory * 0.90)],
-        p99 = metricHistory[math.floor(#metricHistory * 0.99)]
+        median = metricHistory[math.max(math.floor(#metricHistory / 2), 1)],
+        p25 = metricHistory[math.max(math.floor(#metricHistory * 0.25), 1)],
+        p75 = metricHistory[math.max(math.floor(#metricHistory * 0.75), 1)],
+        p90 = metricHistory[math.max(math.floor(#metricHistory * 0.90), 1)],
+        p99 = metricHistory[math.max(math.floor(#metricHistory * 0.99), 1)]
     }
 end
 
