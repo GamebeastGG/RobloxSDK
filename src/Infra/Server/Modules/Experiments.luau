@@ -8,6 +8,8 @@ local Players = game:GetService("Players")
 local GBRequests = shared.GBMod("GBRequests")
 local Signal = shared.GBMod("Signal")
 local Utilities = shared.GBMod("Utilities")
+local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
+local Cleaner = shared.GBMod("Cleaner") ---@module Cleaner
 
 -- Types
 type ConfigSnapshot = {
@@ -29,9 +31,26 @@ type AvailableExperimentsSnapshot = {
 	scheduled: {[string]: {number}},
 }
 type ExperimentReassignmentPropagationRequest = {
-	playerIds: {number},
+	playerIds: {string},
 	gameserverIds: {string},
 }
+
+type BaseAssignmentResponse = {
+	groups: {AvailableExperimentGroupSnapshot}?,
+}
+type GameserverAssignmentResponse = BaseAssignmentResponse & {
+	targetType: "gameserver",
+	gameserverGroupId: number?,
+}
+type PlayerAssignmentResponse = BaseAssignmentResponse & {
+	targetType: "player",
+	playerIdsByGroupId: {[string]: {string}},
+}
+type EmptyAssignmentResponse = nil
+type AssignmentResponse =
+	GameserverAssignmentResponse
+	| PlayerAssignmentResponse
+	| EmptyAssignmentResponse
 
 --[[
 	How long to wait before requesting bulk assignment after calling `queueAssignment()`.
@@ -96,6 +115,8 @@ Experiments.OnAssignedServerConfigChanged = Signal.new()
 Experiments.OnAssignedPlayerConfigChanged = Signal.new()
 
 Experiments.CanonicalServerConfig = nil :: ConfigSnapshot?
+
+Experiments.OnAssignmentDisabling = Signal.new()
 
 --[[
 	Updates whether assignments are being requested or not, based on the given
@@ -224,13 +245,74 @@ function Experiments:ProcessExperimentReassignmentRequest(request: ExperimentRea
 	end
 
 	-- If players in the server are included in the request, queue them for reassignment
-	for _, playerId in request.playerIds do
-		local player = Players:GetPlayerByUserId(playerId)
+	for _, playerIdString in request.playerIds do
+		local playerId = tonumber(playerIdString)
+		local player = playerId and Players:GetPlayerByUserId(playerId)
 		if player then
 			Utilities.GBLog("Queueing reassignment as requested for player:", player.Name)
 			queueAssignment({ player })
 		end
 	end
+end
+
+--[[
+	Calls `callback` with the experiment group ID applied to a player once it's known.
+	If assignment is disabled, or the player leaves, this may be `nil`.
+
+	Returns a function to cancel listening.
+]]
+function Experiments:ListenForPlayerAssignment(player: Player, callback: (groupId: number?) -> ()): RBXScriptSignal
+	local listenerCleaner = Cleaner.new()
+	local connection = SignalConnection.new(function()
+		listenerCleaner:Destroy()
+	end)
+
+	local function resolve(groupId: number?)
+		connection:Disconnect() -- Disconnect the listener
+		task.spawn(callback, groupId)
+
+		return connection -- Return dead connection
+	end
+
+	-- If assignment is not enabled, immediately return nil
+	if not currentAssignmentState then
+		return resolve(nil)
+	end
+
+	-- If server is assigned, return the assigned group ID
+	if Experiments.AssignedServerGroupId then
+		return resolve(Experiments.AssignedServerGroupId)
+	end
+
+	-- If player is assigned, return the assigned group ID
+	if Experiments.AssignedGroupIdByPlayer[player] then
+		return resolve(Experiments.AssignedGroupIdByPlayer[player])
+	end
+
+	-- Wait for assignment to change for player or server, or for it to be disabled
+	listenerCleaner:Add(Experiments.OnPlayerGroupIdChanged:Connect(function (changedPlayer: Player, newGroupId: number?)
+		if (changedPlayer == player) and newGroupId then
+			resolve(newGroupId)
+		end
+	end))
+
+	listenerCleaner:Add(Experiments.OnServerGroupIdChanged:Connect(function (newGroupId: number?)
+		if newGroupId then
+			resolve(newGroupId)
+		end
+	end))
+
+	listenerCleaner:Add(Experiments.OnAssignmentDisabling:Connect(function ()
+		resolve(nil)
+	end))
+
+	listenerCleaner:Add(Players.PlayerRemoving:Connect(function (leavingPlayer: Player)
+		if leavingPlayer == player then
+			resolve(nil)
+		end
+	end))
+
+	return connection
 end
 
 --[[
@@ -279,6 +361,8 @@ function disableAssignment()
 	if not currentAssignmentState then
 		return
 	end
+
+	Experiments.OnAssignmentDisabling:Fire()
 
 	-- Clear current assignments
 	setAssignedServerGroupId(nil)
@@ -377,34 +461,36 @@ function executeAssignmentRequest()
 
 		return
 	end
+	local assignmentResponse = response :: AssignmentResponse
 
 	-- If no experiments are available for assignment, disable assignment
-	if not response then
+	if not assignmentResponse then
 		disableAssignment()
 		return
 	end
 
 	-- Cache new received group snapshots
-	if response.groups then
-		for _, group in response.groups do
+	if assignmentResponse.groups then
+		for _, group in assignmentResponse.groups do
 			initializeActiveGroupState(group)
 			clearUnfetchedActiveGroupState(group.id)
 		end
 	end
 
-	if response.gameserverGroupId then
-		setAssignedServerGroupId(response.gameserverGroupId)
+	if (assignmentResponse.targetType == "gameserver") and assignmentResponse.gameserverGroupId then
+		setAssignedServerGroupId(assignmentResponse.gameserverGroupId)
 
 		-- Clear previous per-player assignments, if any
 		for player in Experiments.AssignedGroupIdByPlayer do
 			setAssignedPlayerGroupId(player, nil)
 		end
 
-	elseif response.playerIdsByGroupId then
-		for groupIdString: string, groupPlayerIds in response.playerIdsByGroupId do
+	elseif (assignmentResponse.targetType == "player") and assignmentResponse.playerIdsByGroupId then
+		for groupIdString, groupPlayerIds in assignmentResponse.playerIdsByGroupId do
 			local groupId = tonumber(groupIdString) :: number
-			for _, playerId in groupPlayerIds do
-				local player = Players:GetPlayerByUserId(playerId)
+			for _, playerIdString in groupPlayerIds do
+				local playerId = tonumber(playerIdString)
+				local player = playerId and Players:GetPlayerByUserId(playerId)
 				if player then
 					setAssignedPlayerGroupId(player, groupId)
 				end

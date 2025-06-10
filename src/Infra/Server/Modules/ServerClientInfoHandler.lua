@@ -35,7 +35,9 @@ local ClientInfoChangedSignal = Signal.new()
 --= Constants =--
 
 local DEFAULT_INFO = {
-    device = "unknown",
+    inputType = "unknown" :: "keyboard" | "gamepad" | "touch" | "unknown",
+    device = "unknown" :: "pc" | "mobile" | "console" | "vr" | "unknown",
+    deviceSubType = "unknown" :: "tablet" | "phone" | "xbox" | "playstation" | "unknown",
     friendsOnline = 0,
     preservedSessionData = {},
 }
@@ -62,21 +64,19 @@ function ServerClientInfoHandler:GetClientInfo(player : Player | number, key : s
     return ClientInfoCache[player][key]
 end
 
-function ServerClientInfoHandler:OnClientInfoResolved(player : Player, timeoutSeconds : number, callback : (timedout : boolean, info : { [string] : any }) -> nil)
+function ServerClientInfoHandler:GetDefaultInfo()
+    return table.clone(DEFAULT_INFO)
+end
+
+function ServerClientInfoHandler:OnClientInfoResolved(player : Player, callback : (info : { [string] : any }) -> nil)
     if ClientInfoCache[player] then
-        callback(false, table.clone(ClientInfoCache[player]))
+        callback(table.clone(ClientInfoCache[player]))
         return
     end
 
-    local timeout = SignalTimeout.new(timeoutSeconds, ClientInfoResolvedSignal, function(resolvedPlayer : Player)
-        return resolvedPlayer == player
-    end)
-
-    return timeout:Once(function(timedout : boolean, _, info : { [string] : any }?)
-        if timedout or not info then
-            callback(true, table.clone(DEFAULT_INFO))
-        elseif info then
-            callback(false, table.clone(info))
+    return ClientInfoResolvedSignal:Connect(function(resolvedPlayer : Player, clientInfo : { [string] : any })
+        if resolvedPlayer == player then
+            callback(table.clone(clientInfo))
         end
     end)
 end
@@ -126,23 +126,27 @@ function ServerClientInfoHandler:Init()
         ClientInfoCache[player] = nil
     end)
 
-    ClientInfoRemote.OnServerEvent:Connect(function(player : Player, updatedKey : string, updatedValue : any)
-        if not updatedKey or not updatedValue then
-            return
-        end
-
-        if DEFAULT_INFO[updatedKey] == nil then
-            return
-        end
-
+    ClientInfoRemote.OnServerEvent:Connect(function(player : Player, updatedInfo : { [string] : any })
+       
         local isNew = false
         if not ClientInfoCache[player] then
             ClientInfoCache[player] = table.clone(DEFAULT_INFO)
             isNew = true
         end
 
-        ClientInfoCache[player][updatedKey] = updatedValue
-        ClientInfoChangedSignal:Fire(player, updatedKey, updatedValue)
+        for updatedKey, updatedValue in pairs(updatedInfo) do
+            if DEFAULT_INFO[updatedKey] == nil then
+                return
+            end
+
+            local currentValue = ClientInfoCache[player][updatedKey]
+            if currentValue == updatedValue then
+                continue
+            end
+
+            ClientInfoCache[player][updatedKey] = updatedValue
+            ClientInfoChangedSignal:Fire(player, updatedKey, updatedValue)
+        end
 
         if isNew then
             ClientInfoResolvedSignal:Fire(player, ClientInfoCache[player])

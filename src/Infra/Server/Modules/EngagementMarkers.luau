@@ -20,6 +20,8 @@ local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
+local Timer = shared.GBMod("Timer") ---@module Timer
+local Cleaner = shared.GBMod("Cleaner")
 local MetaData = shared.GBMod("MetaData")
 local GetRemote = shared.GBMod("GetRemote")
 local Utilities = shared.GBMod("Utilities")
@@ -27,7 +29,7 @@ local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
 local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
 local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
-
+local Experiments = shared.GBMod("Experiments") ---@module Experiments
 
 --= Types =--
 
@@ -59,22 +61,6 @@ local MarkerQueue = {}
 local SessionIds = {}
 local LastEventReportTime = 0
 local ClientInfoWarned = false
-
---[[
-	When set, this is included in each marker's `experimentGroupId` property.
-
-	Set through `EngagementMarkers:SetServerExperimentGroupId()` based on the
-	group ID currently assigned to the server in an experiment, if any.
-]]
-local GameserverExperimentGroupId = nil :: number?
-
---[[
-	When set, these are included in the `experimentGroupId` property of the player's markers.
-
-	Set through `EngagementMarkers:SetPlayerExperimentGroupId()` based on the
-	group ID currently assigned to the player in an experiment, if any.
-]]
-local ExperimentGroupIdByPlayer = {} :: {[Player]: number}
 
 
 --= Public Variables =--
@@ -169,14 +155,18 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		["value"] = value,
 		["properties"] = {
 			["sdkPlatform"] = "roblox",
+			["placeId"] = game.PlaceId,
+			["placeVersion"] = game.PlaceVersion,
 			["origin"] = source,
 			["device"] = nil, -- Resolved later
+			["deviceSubType"] = nil, -- Resolved later
+			["inputType"] = nil, -- Resolved later
 			["position"] = position ~= nil and EncodeVector3(position) or nil,
 			["language"] = player and LocalizationCache:GetLocaleId(player) or nil,
 			["country"] = player and LocalizationCache:GetRegionId(player) or nil,
 			["experimentGroupId"] = player
-				and ExperimentGroupIdByPlayer[player]
-				or GameserverExperimentGroupId,
+				and Experiments.AssignedGroupIdByPlayer[player]
+				or Experiments.AssignedServerGroupId,
 		},
 	}
 
@@ -188,10 +178,26 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			EngagementMarkers:SendMarkers()
 		end
 	end
-	
-	if player then -- Ensure marker gets fired with device info on timeout or bind to close
-		local function resolved()
+
+	--[[
+		Ensure markers are sent with all required data.
+	]]
+
+	local pendingMarkerData = {
+		pendingCleaner = Cleaner.new(),
+		tasks = {},
+		activeTasks = 0,
+		resolved = nil,
+	}
+
+	InternalConfigs:OnReady(function()
+		local function resolved(shutdown : boolean?)
+			pendingMarkerData.pendingCleaner:Clean()
+
+			-- Add any final missing data to the marker
 			entry.properties.device = ServerClientInfoHandler:GetClientInfo(player, "device")
+			entry.properties.deviceSubType = ServerClientInfoHandler:GetClientInfo(player, "deviceSubType")
+			entry.properties.inputType = ServerClientInfoHandler:GetClientInfo(player, "inputType")
 
 			-- Attempt to resolve session ID from client info so we preserve it across game sessions.
 			local preservedSessionId = ServerClientInfoHandler:GetClientInfo(player, "preservedSessionId")
@@ -205,36 +211,74 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			end
 
 			addMarker()
-		end
-		
-		local waitingData = {
-			callback = resolved,
-			connection = nil
-		}
 
-		local connection = ServerClientInfoHandler:OnClientInfoResolved(player, CLIENT_DATA_TIMEOUT, function(timedout, ...)
-			if timedout and ClientInfoWarned == false then
+			-- Remove from waiting list if it exists
+			if not shutdown then
+				local index = table.find(WaitingPlayerMarkers, pendingMarkerData)
+				if index then
+					table.remove(WaitingPlayerMarkers, index)
+				end
+			end
+		end
+
+		pendingMarkerData.resolved = resolved
+
+		-- Task manager
+
+		-- Will only add tasks if they arent already finished and the connection is still active.
+		local function addTask(taskName : string, connection : RBXScriptConnection?)
+			if not pendingMarkerData.tasks[taskName] and connection ~= nil and connection.Connected == true then
+				pendingMarkerData.activeTasks += 1
+				pendingMarkerData.tasks[taskName] = connection
+
+				if connection then
+					pendingMarkerData.pendingCleaner:Add(connection)
+				end
+			end
+		end
+
+		local function completeTask(taskName : string)
+			if pendingMarkerData.tasks[taskName] then
+				pendingMarkerData.tasks[taskName] = nil
+				pendingMarkerData.activeTasks -= 1
+
+				if pendingMarkerData.activeTasks <= 0 then
+					resolved()
+				end
+			end
+		end
+
+		-- Stop wating after some time if tasks are not resolved
+		local dataFetchTimer = Timer.new(CLIENT_DATA_TIMEOUT)
+		pendingMarkerData.pendingCleaner:Add(dataFetchTimer)
+		pendingMarkerData.pendingCleaner:Add(dataFetchTimer:OnEnd(function()
+			if not ServerClientInfoHandler:IsClientInfoResolved(player) and ClientInfoWarned == false then
 				Utilities.GBWarn("Failed to resolve client info, did you forget to :Setup() Gamebeast SDK on the client?")
 				ClientInfoWarned = true
 			end
 
-			local index = table.find(WaitingPlayerMarkers, waitingData)
-			if index then
-				table.remove(WaitingPlayerMarkers, index)
-			end
-
 			resolved()
-		end)
+		end))
 
-		if not connection then
-			return
+		if player then -- Ensure marker gets fired with device info on timeout or bind to close
+			addTask("clientInfo", ServerClientInfoHandler:OnClientInfoResolved(player, function()
+				completeTask("clientInfo")
+			end))
 		end
 
-		waitingData.connection = connection
-		table.insert(WaitingPlayerMarkers, waitingData)
-	else
-		addMarker()
-	end
+		if entry.properties.experimentGroupId == nil then
+			addTask("experimentGroup", Experiments:ListenForPlayerAssignment(player, function (groupId: number?)
+				entry.properties.experimentGroupId = groupId
+				completeTask("experimentGroup")
+			end))
+		end
+
+		if pendingMarkerData.activeTasks <= 0 then
+			resolved()
+		else
+			table.insert(WaitingPlayerMarkers, pendingMarkerData)
+		end
+	end)
 end
 
 -- Fire an engagement marker. Used by devs via API module, wraps createMarker to declare source.
@@ -250,22 +294,6 @@ end
 
 function EngagementMarkers:ClearSessionId(player : Player)
 	SessionIds[player] = nil
-end
-
---[[
-	Sets the assigned experiment group ID to be included in the `experimentGroupId`
-	property of the player's markers.
-]]
-function EngagementMarkers:SetPlayerExperimentGroupId(player: Player, groupId: number?)
-	ExperimentGroupIdByPlayer[player] = groupId
-end
-
---[[
-	Sets the assigned experiment group ID to be included in the `experimentGroupId`
-	property of the server's markers.
-]]
-function EngagementMarkers:SetServerExperimentGroupId(groupId: number?)
-	GameserverExperimentGroupId = groupId
 end
 
 --= Initializers =--
@@ -305,9 +333,8 @@ function EngagementMarkers:Init()
 	end)
 
 	GBRequests:OnFinalRequestCall(function()
-		for _, waiting in WaitingPlayerMarkers do
-			waiting.connection:Disconnect()
-			waiting.callback()
+		for _, data in WaitingPlayerMarkers do
+			data.resolved(true)
 		end
 
 		EngagementMarkers:SendMarkers()
