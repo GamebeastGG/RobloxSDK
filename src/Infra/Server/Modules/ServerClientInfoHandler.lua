@@ -37,7 +37,7 @@ local ClientInfoChangedSignal = Signal.new()
 local DEFAULT_INFO = {
     device = "unknown",
     friendsOnline = 0,
-    preservedSessionId = "",
+    preservedSessionData = {},
 }
 
 --= Variables =--

@@ -24,6 +24,7 @@ local Utilities = shared.GBMod("Utilities")
 local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
 local PlayerStats = shared.GBMod("PlayerStats") ---@module PlayerStats
 local SocialHandler = shared.GBMod("SocialHandler") ---@module SocialHandler
+local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 
 --= Types =--
 
@@ -68,7 +69,7 @@ function SessionMarkers:Init()
         end
 	end)
 
-	Players.PlayerRemoving:Connect(function(player)		
+	Players.PlayerRemoving:Connect(function(player)
 		-- Collect last position for Logout marker
 		local position = LastCharPositions[player]
 		LastCharPositions[player] = nil
@@ -82,7 +83,7 @@ function SessionMarkers:Init()
 		}
 
 		
-		if PlayerStats:GetStat(player, "teleporting") == true then
+		if ServerClientInfoHandler:IsClientInfoResolved() == true and PlayerStats:GetStat(player, "teleporting") == true then
 			-- If the player was teleporting, we don't send a Logout marker
 			return
 		end

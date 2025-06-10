@@ -30,7 +30,7 @@ local GetRemote = shared.GBMod("GetRemote")
 
 local ClientInfoRemote = GetRemote("Event", "ClientInfoChanged")
 local ClientProductPriceRemote = GetRemote("Function", "GetProductPrice")
-local SessionIdResovedRemote = GetRemote("Event", "SessionIdResolved")
+local SessionPreservationRemote = GetRemote("Event", "SessionPreservation")
 
 --= Constants =--
 
@@ -95,7 +95,7 @@ end
 --= Initializers =--
 function ClientInfoHandler:Init()
     UpdateClientInfo("device", self:GetDeviceType(), true)
-    UpdateClientInfo("preservedSessionId", TeleportService:GetTeleportSetting("GAMEBEAST_SID") or "")
+    UpdateClientInfo("preservedSessionData", TeleportService:GetTeleportSetting("GAMEBEAST_SESSION") or "")
 
     -- Friends online
     task.spawn(function()
@@ -138,10 +138,8 @@ function ClientInfoHandler:Init()
     end
 
     -- Session ID resolution
-    SessionIdResovedRemote.OnClientEvent:Connect(function(sessionId : string)
-        if sessionId and sessionId ~= "" then
-            TeleportService:SetTeleportSetting("GAMEBEAST_SID", sessionId)
-        end
+    SessionPreservationRemote.OnClientEvent:Connect(function(sessionInfo : {[string] : any})
+        TeleportService:SetTeleportSetting("GAMEBEAST_SESSION", sessionInfo)
     end)
 end
 
