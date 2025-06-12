@@ -18,15 +18,19 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
+local Signal = shared.GBMod("Signal") ---@module Signal
+
 --= Types =--
 
 --= Object References =--
 
+local DefaultStatsResolved = Signal.new()
+
 --= Constants =--
 
 local DEFAULT_SCHEMA = {
-    session_length = function()
-		return tick()
+    join_time = function()
+		return os.time()
 	end,
     teleporting = function()
         return false
@@ -63,6 +67,12 @@ function PlayerStats:Reset(player : Player)
     for statName, initializer in DEFAULT_SCHEMA do
         SessionData[player][statName] = initializer()
     end
+
+    DefaultStatsResolved:Fire(player, SessionData[player])
+end
+
+function PlayerStats:OnDefaultStatsResolved(callback : (player : Player, stats : { [string] : any }) -> nil) : RBXScriptSignal
+    return DefaultStatsResolved:Connect(callback)
 end
 
 --= Initializers =--

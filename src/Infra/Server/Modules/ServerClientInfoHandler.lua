@@ -22,6 +22,7 @@ local GetRemote = shared.GBMod("GetRemote")
 local Signal = shared.GBMod("Signal")
 local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
 local SignalTimeout = shared.GBMod("SignalTimeout") ---@module SignalTimeout
+local Schema = shared.GBMod("Schema") ---@module Schema
 
 --= Types =--
 
@@ -34,13 +35,37 @@ local ClientInfoChangedSignal = Signal.new()
 
 --= Constants =--
 
-local DEFAULT_INFO = {
-    inputType = "unknown" :: "keyboard" | "gamepad" | "touch" | "unknown",
-    device = "unknown" :: "pc" | "mobile" | "console" | "vr" | "unknown",
-    deviceSubType = "unknown" :: "tablet" | "phone" | "xbox" | "playstation" | "unknown",
-    friendsOnline = 0,
-    preservedSessionData = {},
-}
+local DefaultInfo = Schema.new({
+    inputType = {
+        default = "unknown",
+        type = "string",
+    },
+    device = {
+        default = "unknown",
+        type = "string",
+    },
+    deviceSubType = {
+        default = "unknown",
+        type = "string",
+    },
+    -- Preserved
+    sessionId = {
+        default = nil,
+        type = "string",
+    },
+    joinTime = {
+        default = 0,
+        type = "number",
+    },
+    totalFriendPlaytime = {
+        default = 0,
+        type = "number",
+    },
+    hasFriendsOnline = {
+        default = false,
+        type = "boolean",
+    }
+})
 
 --= Variables =--
 
@@ -50,6 +75,32 @@ local ClientInfoCache = {}
 
 --= Internal Functions =--
 
+local function UpdateClientInfoCache(player : Player, updatedInfo : { [string] : any })
+    local isNew = false
+    if not ClientInfoCache[player] then
+        ClientInfoCache[player] = DefaultInfo:GetDefault()
+        isNew = true
+    end
+
+    for updatedKey, updatedValue in pairs(updatedInfo) do
+        if not DefaultInfo:HasKey(updatedKey) then
+            return
+        end
+
+        local currentValue = ClientInfoCache[player][updatedKey]
+        if currentValue == updatedValue then
+            continue
+        end
+
+        ClientInfoCache[player][updatedKey] = updatedValue
+        ClientInfoChangedSignal:Fire(player, updatedKey, updatedValue)
+    end
+
+    if isNew then
+        ClientInfoResolvedSignal:Fire(player, ClientInfoCache[player])
+    end
+end
+
 --= API Functions =--
 
 function ServerClientInfoHandler:GetClientInfo(player : Player | number, key : string) : any
@@ -57,28 +108,31 @@ function ServerClientInfoHandler:GetClientInfo(player : Player | number, key : s
         player = Players:GetPlayerByUserId(player)
     end
 
-    if not player or not ClientInfoCache[player] or not ClientInfoCache[player][key] then
-        return DEFAULT_INFO[key]
+    if not player or not ClientInfoCache[player] or ClientInfoCache[player][key] == nil then
+        return DefaultInfo:GetDefaultForKey(key)
     end
     
     return ClientInfoCache[player][key]
 end
 
-function ServerClientInfoHandler:GetDefaultInfo()
-    return table.clone(DEFAULT_INFO)
-end
-
 function ServerClientInfoHandler:OnClientInfoResolved(player : Player, callback : (info : { [string] : any }) -> nil)
-    if ClientInfoCache[player] then
+    if self:IsClientInfoResolved() then
         callback(table.clone(ClientInfoCache[player]))
         return
     end
 
-    return ClientInfoResolvedSignal:Connect(function(resolvedPlayer : Player, clientInfo : { [string] : any })
+    local connection
+    connection = ClientInfoResolvedSignal:Connect(function(resolvedPlayer : Player, clientInfo : { [string] : any })
         if resolvedPlayer == player then
-            callback(table.clone(clientInfo))
+            connection:Disconnect()
+
+            if clientInfo then
+                callback(table.clone(clientInfo))
+            end
         end
     end)
+
+    return connection
 end
 
 function ServerClientInfoHandler:OnClientInfoChanged(player : Player, callback : (key : string, value : any) -> nil) : RBXScriptConnection
@@ -120,38 +174,29 @@ function ServerClientInfoHandler:GetProductPriceForPlayer(player : Player | numb
     end
 end
 
+function ServerClientInfoHandler:UpdateClientData(player : Player | number, key : string, value : any)
+    if typeof(player) == "number" then
+        player = Players:GetPlayerByUserId(player)
+    end
+
+    self:OnClientInfoResolved(player, function()
+        if not player.Parent then
+            return -- Player is not in the game, do not update cache
+        end
+
+        --UpdateClientInfoCache(player, {[key] = value}, true) -- We actually want the client to send this back to us.
+        ClientInfoRemote:FireClient(player, key, value)
+    end)
+end
+
 --= Initializers =--
 function ServerClientInfoHandler:Init()
     Players.PlayerRemoving:Connect(function(player : Player)
         ClientInfoCache[player] = nil
+        ClientInfoResolvedSignal:Fire(player, nil)
     end)
 
-    ClientInfoRemote.OnServerEvent:Connect(function(player : Player, updatedInfo : { [string] : any })
-       
-        local isNew = false
-        if not ClientInfoCache[player] then
-            ClientInfoCache[player] = table.clone(DEFAULT_INFO)
-            isNew = true
-        end
-
-        for updatedKey, updatedValue in pairs(updatedInfo) do
-            if DEFAULT_INFO[updatedKey] == nil then
-                return
-            end
-
-            local currentValue = ClientInfoCache[player][updatedKey]
-            if currentValue == updatedValue then
-                continue
-            end
-
-            ClientInfoCache[player][updatedKey] = updatedValue
-            ClientInfoChangedSignal:Fire(player, updatedKey, updatedValue)
-        end
-
-        if isNew then
-            ClientInfoResolvedSignal:Fire(player, ClientInfoCache[player])
-        end
-    end)
+    ClientInfoRemote.OnServerEvent:Connect(UpdateClientInfoCache)
 end
 
 --= Return Module =--

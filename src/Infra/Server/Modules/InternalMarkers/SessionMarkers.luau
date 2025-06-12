@@ -66,6 +66,10 @@ function SessionMarkers:Init()
 			}
 
 			EngagementMarkers:SDKMarker("Login", loginArgs, {player = player, position = nil})
+
+			PlayerStats:OnDefaultStatsResolved(function()
+				ServerClientInfoHandler:UpdateClientData(player, "joinTime", PlayerStats:GetStat(player, "join_time"))
+			end)
         end
 	end)
 
@@ -75,14 +79,14 @@ function SessionMarkers:Init()
 		LastCharPositions[player] = nil
 		
 		-- Compute session length in addition to backend for reasons(?)
-		local sessionLength = Utilities.roundNum(tick() - PlayerStats:GetStat(player, "session_length"), 0.1)
+		local clientJoinTime = ServerClientInfoHandler:GetClientInfo(player, "joinTime")
+		local sessionLength = Utilities.roundNum(os.time() - (clientJoinTime or PlayerStats:GetStat(player, "join_time")), 0.1)
 		local friendPlaytimePercent = SocialHandler:GetTotalFriendPlaytime(player)
 		local args = {
 			["sessionLength"] = sessionLength,
 			["sessionLengthPercentageWithFriends"] = if friendPlaytimePercent then Utilities.roundNum(friendPlaytimePercent/sessionLength, 0.01) else nil
 		}
 
-		
 		if ServerClientInfoHandler:IsClientInfoResolved() == true and PlayerStats:GetStat(player, "teleporting") == true then
 			-- If the player was teleporting, we don't send a Logout marker
 			return

@@ -35,9 +35,6 @@ local Experiments = shared.GBMod("Experiments") ---@module Experiments
 
 --= Object References =--
 
-local SessionIdResovedRemote = GetRemote("Event", "SessionIdResolved")
-local FireMarkerEvent = GetRemote("Event", "FireMarker")
-
 --= Constants =--
 
 local CLIENT_DATA_TIMEOUT = RunService:IsStudio() and 10 or 45
@@ -70,7 +67,7 @@ local ClientInfoWarned = false
 local function GetSessionIdForPlayer(player) : string?
 	if SessionIds[player] == nil and player.Parent then
 		SessionIds[player] = HttpService:GenerateGUID(false)
-		SessionIdResovedRemote:FireClient(player, SessionIds[player])
+		ServerClientInfoHandler:UpdateClientData(player, "sessionId", SessionIds[player])
 	end
 
 	return SessionIds[player]
@@ -200,11 +197,11 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			entry.properties.inputType = ServerClientInfoHandler:GetClientInfo(player, "inputType")
 
 			-- Attempt to resolve session ID from client info so we preserve it across game sessions.
-			local preservedSessionId = ServerClientInfoHandler:GetClientInfo(player, "preservedSessionId")
-			if preservedSessionId and preservedSessionId ~= "" then
-				entry.sessionId = preservedSessionId
+			local sessionId = ServerClientInfoHandler:GetClientInfo(player, "sessionId")
+			if sessionId and sessionId ~= "" then
+				entry.sessionId = sessionId
 				if player.Parent then
-					SessionIds[player] = preservedSessionId
+					SessionIds[player] = sessionId
 				end
 			else
 				entry.sessionId = GetSessionIdForPlayer(player)

@@ -22,6 +22,7 @@ local Players = game:GetService("Players")
 local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module EngagementMarkers
 local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 local PlayerStats = shared.GBMod("PlayerStats") ---@module PlayerStats
+local Cleaner = shared.GBMod("Cleaner") ---@module Cleaner
 
 --= Types =--
 
@@ -39,11 +40,8 @@ local FriendsInServerCache = {}
 
 local function CreateCacheEntry(player : Player) : { [string]: any }
     local newEntry = {
-        Timestamp = tick(),
-        TotalTime = 0,
-        FriendInServer = false,
-        UpdatedByClient = false,
-        _connection = nil
+        LastClientUpdate = 0,
+        Cleaner = Cleaner.new(),
     }
 
     FriendsInServerCache[player] = newEntry
@@ -55,16 +53,19 @@ end
 
 function SocialHandler:GetTotalFriendPlaytime(player : Player) : number?
     local cachedData = FriendsInServerCache[player]
-    if not cachedData or cachedData.UpdatedByClient == false then
+    if cachedData == nil or ServerClientInfoHandler:IsClientInfoResolved(player) == false then
         return nil
     end
-
+    
     FriendsInServerCache[player] = nil
+    
+    local hasFriendsOnline = ServerClientInfoHandler:GetClientInfo(player, "hasFriendsOnline")
+    local totalTime = ServerClientInfoHandler:GetClientInfo(player, "totalFriendPlaytime")
 
-    if cachedData.FriendInServer then
-        return cachedData.TotalTime + (tick() - cachedData.Timestamp)
+    if hasFriendsOnline then
+        return totalTime + (os.clock() - cachedData.LastClientUpdate)
     else
-        return cachedData.TotalTime
+        return totalTime
     end
 end
 
@@ -81,26 +82,11 @@ function SocialHandler:Init()
             }, { player = player })
         end
 
-        cacheEntry._connection = ServerClientInfoHandler:OnClientInfoChanged(player, function(key, value)
-            if key == "friendsOnline" then
-                local hasFriendsInServer = value > 0
-
-                if cacheEntry.UpdatedByClient == false and hasFriendsInServer then
-                    local joinedAt = PlayerStats:GetStat(player, "session_length")
-                    cacheEntry.TotalTime += (tick() - joinedAt)
-                end
-
-                cacheEntry.UpdatedByClient = true
-
-                if hasFriendsInServer == false and cacheEntry.FriendInServer == true then
-                    cacheEntry.TotalTime += (tick() - cacheEntry.Timestamp)
-                elseif hasFriendsInServer == true and cacheEntry.FriendInServer == false then
-                    cacheEntry.Timestamp = tick()
-                end
-
-                cacheEntry.FriendInServer = hasFriendsInServer
+        cacheEntry.Cleaner:GiveTask(ServerClientInfoHandler:OnClientInfoChanged(player, function(key, _)
+            if key == "friendClockStart" then
+                cacheEntry.LastClientUpdate = os.clock()
             end
-        end)
+        end))
 
         player.OnTeleport:Connect(function(teleportState)
             if teleportState == Enum.TeleportState.Started then
@@ -109,29 +95,6 @@ function SocialHandler:Init()
                 PlayerStats:SetStat(player, "teleporting", false)
             end
         end)
-
-        --NOTE: Disabled since large servers with lots of players joining will result in too many HTTP requests.
-        --[[ Look for friends
-        for _, potentialFriend in ipairs(Players:GetPlayers()) do
-            if potentialFriend ~= player and (player:IsFriendsWith(potentialFriend.UserId) or player.UserId < 0) then
-                FriendStatusUpdated(player, potentialFriend, true)
-                FriendStatusUpdated(potentialFriend, player, true)
-            end
-
-            if player.Parent == nil then
-                return
-            end
-        end
-
-        local cachedData = FriendsInServerCache[player]
-        if cachedData and #cachedData.Friends > 0 then
-            
-            --NOTE: This prevents sending a marker for every friend in the server. ie: you join a game with 100 friends, we'd send 100 markers.
-            EngagementMarkers:SDKMarker("JoinedFriend", {
-                friendUserId = cachedData.Friends[1].UserId,
-                friendsInServer = #cachedData.Friends,
-            }, { player = player })
-        end]]
     end
 
     Players.PlayerAdded:Connect(playerAdded)
@@ -141,11 +104,9 @@ function SocialHandler:Init()
 	
     Players.PlayerRemoving:Connect(function(player)
         if FriendsInServerCache[player] then
-            FriendsInServerCache[player]._connection:Disconnect()
+            FriendsInServerCache[player].Cleaner:Destroy()
         end
     end)
-
-    
 end
 
 --= Return Module =--
