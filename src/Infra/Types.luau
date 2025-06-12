@@ -25,8 +25,11 @@ export type ConfigsService = {
 	Get : (self : ConfigsService, path : string | { string }) -> any,
 	Observe : (self : ConfigsService, targetConfig : string | { string }, callback : (newValue : any, oldValue : any) -> ()) -> RBXScriptConnection,
 	OnChanged : (self : ConfigsService, targetConfig : string | {string}, callback : (newValue : any, oldValue : any) -> ()) -> RBXScriptConnection,
-	OnReady : (self : ConfigsService, callback : (configs : any) -> ()) -> RBXScriptSignal,
+	OnReady : (self : ConfigsService, callback : (configs : any) -> ()) -> RBXScriptConnection,
 	IsReady : (self : ConfigsService) -> boolean,
+	GetForPlayer : (self : ConfigsService, player : Player, path : string | { string }) -> any,
+	ObserveForPlayer : (self : ConfigsService, player : Player, targetConfig : string | { string }, callback : (newValue : any, oldValue : any) -> ()) -> RBXScriptConnection,
+	OnChangedForPlayer : (self : ConfigsService, player : Player, targetConfig : string | {string}, callback : (newValue : any, oldValue : any) -> ()) -> RBXScriptConnection,
 }
 
 export type MarkersService = {
@@ -46,6 +49,6 @@ export type EventsService = {
 }
 
 
-export type Service = ConfigsService | MarkersService | EventsService
+export type Service = ConfigsService | MarkersService | EventsService | JobsService
 
 return true

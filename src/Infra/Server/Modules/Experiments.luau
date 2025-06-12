@@ -261,7 +261,7 @@ end
 
 	Returns a function to cancel listening.
 ]]
-function Experiments:ListenForPlayerAssignment(player: Player, callback: (groupId: number?) -> ()): RBXScriptSignal
+function Experiments:ListenForPlayerAssignment(player: Player, callback: (groupId: number?) -> ()): RBXScriptConnection
 	local listenerCleaner = Cleaner.new()
 	local connection = SignalConnection.new(function()
 		listenerCleaner:Destroy()
