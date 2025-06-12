@@ -5,7 +5,8 @@
 	SessionMarkers.luau
 	
 	Description:
-		No description provided.
+		Handles session markers for player login and logout events.
+		Tracks player session length and friend playtime percentage.
 	
 --]]
 

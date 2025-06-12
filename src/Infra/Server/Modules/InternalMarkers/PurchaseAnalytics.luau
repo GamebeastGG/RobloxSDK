@@ -5,7 +5,7 @@
 	PurchaseAnalytics.luau
 	
 	Description:
-		No description provided.
+		Handles tracking purchases made by players in the server.
 	
 --]]
 

@@ -4,7 +4,7 @@
     SignalConnection.lua
     
     Description:
-        No description provided.    
+        Emulates a RBXScriptConnection for signals, allowing for connection management
 --]]
 
 --= Root =--

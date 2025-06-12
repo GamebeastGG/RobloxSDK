@@ -5,7 +5,8 @@
 	HostServer.luau
 	
 	Description:
-		No description provided.
+		Handles the host server role in a Gamebeast server environment.
+		Ensures that only one host server exists at a time and manages cross-server communication.
 	
 --]]
 

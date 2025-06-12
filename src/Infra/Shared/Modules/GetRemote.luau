@@ -5,7 +5,7 @@
     GetRemote.luau
     
     Description:
-        No description provided.
+        A utility module for retrieving or creating remote functions or events.
     
 --]]
 

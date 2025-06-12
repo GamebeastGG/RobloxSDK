@@ -5,7 +5,7 @@
     ClientInfoHandler.lua
     
     Description:
-        No description provided.
+        Module for managing reported client information and product pricing.
     
 --]]
 

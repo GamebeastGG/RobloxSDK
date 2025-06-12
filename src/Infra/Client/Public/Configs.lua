@@ -5,7 +5,7 @@
     Configs.lua
     
     Description:
-        No description provided.
+        Public API module for accessing client-specific configuration data.
     
 --]]
 

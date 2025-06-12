@@ -5,7 +5,7 @@
     PlayerStats.luau
     
     Description:
-        No description provided.
+        Holds general player state data.
     
 --]]
 

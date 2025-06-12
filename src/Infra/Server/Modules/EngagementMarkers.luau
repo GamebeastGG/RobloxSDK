@@ -5,7 +5,7 @@
 	EngagementMarkers.luau
 	
 	Description:
-		No description provided.
+		Handles processing and sending engagement markers to the Gamebeast backend.
 	
 --]]
 
