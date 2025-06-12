@@ -54,7 +54,7 @@ local DefaultInfo = Schema.new({
         type = "string",
     },
     joinTime = {
-        default = 0,
+        default = nil,
         type = "number",
     },
     totalFriendPlaytime = {
@@ -116,7 +116,7 @@ function ServerClientInfoHandler:GetClientInfo(player : Player | number, key : s
 end
 
 function ServerClientInfoHandler:OnClientInfoResolved(player : Player, callback : (info : { [string] : any }) -> nil)
-    if self:IsClientInfoResolved() then
+    if self:IsClientInfoResolved(player) then
         callback(table.clone(ClientInfoCache[player]))
         return
     end
@@ -145,6 +145,8 @@ end
 
 -- Good way to tell if the client SDK is even initialized.
 function ServerClientInfoHandler:IsClientInfoResolved(player : Player | number) : boolean
+    assert(player, "Player must be provided to check client info resolution.")
+
     if typeof(player) == "number" then
         player = Players:GetPlayerByUserId(player)
     end
@@ -192,8 +194,10 @@ end
 --= Initializers =--
 function ServerClientInfoHandler:Init()
     Players.PlayerRemoving:Connect(function(player : Player)
-        ClientInfoCache[player] = nil
         ClientInfoResolvedSignal:Fire(player, nil)
+        task.defer(function()
+            ClientInfoCache[player] = nil
+        end)
     end)
 
     ClientInfoRemote.OnServerEvent:Connect(UpdateClientInfoCache)

@@ -87,7 +87,7 @@ function SessionMarkers:Init()
 			["sessionLengthPercentageWithFriends"] = if friendPlaytimePercent then Utilities.roundNum(friendPlaytimePercent/sessionLength, 0.01) else nil
 		}
 
-		if ServerClientInfoHandler:IsClientInfoResolved() == true and PlayerStats:GetStat(player, "teleporting") == true then
+		if ServerClientInfoHandler:IsClientInfoResolved(player) == true and PlayerStats:GetStat(player, "teleporting") == true then
 			-- If the player was teleporting, we don't send a Logout marker
 			return
 		end

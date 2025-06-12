@@ -82,17 +82,22 @@ function SocialHandler:Init()
             }, { player = player })
         end
 
-        cacheEntry.Cleaner:GiveTask(ServerClientInfoHandler:OnClientInfoChanged(player, function(key, _)
+        cacheEntry.Cleaner:Add(ServerClientInfoHandler:OnClientInfoChanged(player, function(key, _)
             if key == "friendClockStart" then
                 cacheEntry.LastClientUpdate = os.clock()
             end
         end))
 
+        local activeTeleportCount = 0
         player.OnTeleport:Connect(function(teleportState)
-            if teleportState == Enum.TeleportState.Started then
+            if teleportState == Enum.TeleportState.RequestedFromServer then
                 PlayerStats:SetStat(player, "teleporting", true)
+                activeTeleportCount += 1
             elseif teleportState == Enum.TeleportState.Failed then
-                PlayerStats:SetStat(player, "teleporting", false)
+                activeTeleportCount -= 1
+                if activeTeleportCount <= 0 then
+                    PlayerStats:SetStat(player, "teleporting", false)
+                end
             end
         end)
     end

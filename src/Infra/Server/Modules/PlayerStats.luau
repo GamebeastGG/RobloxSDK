@@ -47,6 +47,18 @@ local SessionData = {}
 
 --= API Functions =--
 
+function PlayerStats:SetStat(player : Player, stat : string, value : any)
+    if not SessionData[player] and player.Parent then
+        self:Reset(player)
+    end
+
+    if DEFAULT_SCHEMA[stat] == nil then
+        error("Cannot set stat: " .. stat)
+    end
+
+    SessionData[player][stat] = value
+end
+
 function PlayerStats:GetStats(player : Player)
     return SessionData[player]
 end
@@ -71,8 +83,21 @@ function PlayerStats:Reset(player : Player)
     DefaultStatsResolved:Fire(player, SessionData[player])
 end
 
-function PlayerStats:OnDefaultStatsResolved(callback : (player : Player, stats : { [string] : any }) -> nil) : RBXScriptSignal
-    return DefaultStatsResolved:Connect(callback)
+function PlayerStats:OnDefaultStatsResolved(player : Player, callback : (stats : { [string] : any }) -> nil) : RBXScriptSignal
+    local connection; connection = DefaultStatsResolved:Connect(function(resolvedPlayer, stats)
+        if resolvedPlayer == player then
+            callback(stats)
+            connection:Disconnect()
+        end
+    end)
+
+    if SessionData[player] then
+        connection:Disconnect() -- Disconnect immediately if already resolved
+        task.spawn(function()
+            callback(SessionData[Players.LocalPlayer])
+        end)
+    end
+    return connection
 end
 
 --= Initializers =--
