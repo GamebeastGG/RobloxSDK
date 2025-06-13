@@ -35,11 +35,11 @@ local PurchaseAnalytics = shared.GBMod("PurchaseAnalytics") ---@module PurchaseA
 
 --= API Functions =--
 
-function Markers:SendMarker(markerType : string, value : number | {[string] : any}, position : Vector3?)
+function Markers:SendMarker(markerType : string, value : any | {[string] : any}, position : Vector3?)
     EngagementMarkers:FireMarker(markerType, value, {position = position})
 end
 
-function Markers:SendPlayerMarker(player : Player, markerType : string, value : number | {[string] : any}, position : Vector3?)
+function Markers:SendPlayerMarker(player : Player, markerType : string, value : any | {[string] : any}, position : Vector3?)
     EngagementMarkers:FireMarker(markerType, value, {player = player, position = position})
 end
 

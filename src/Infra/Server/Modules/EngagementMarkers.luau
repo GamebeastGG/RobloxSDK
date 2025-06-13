@@ -52,6 +52,12 @@ local SYSTEM_MARKERS = {
 	--["GBClientPerformance"] = true,
 	--["GBServerPerformance"] = true,
 }
+local ALLOWED_VALUE_TYPES = {
+	["string"] = true,
+	["number"] = true,
+	["boolean"] = true,
+	["table"] = true, -- Only dictionaries, not arrays
+}
 
 --= Variables =--
 
@@ -103,7 +109,7 @@ end
 
 -- Core function, should be used internally by SDK rather than fireMarker
 -- function EngagementMarkers:CreateMarker(source, markerType, player, position, value)
-function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", markerType : string, value : number | {[string] : any}, metaData : {[string] : any})
+function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", markerType : string, value : any | {[string] : any}, metaData : {[string] : any})
 	metaData = metaData or {}
 	-- Validate all arguments.
 	local usageStr
@@ -132,11 +138,19 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		return
 	end
 	
-	local valueType = typeof(value)
-
-	if value ~= nil and valueType ~= "table" and valueType ~= "number" or (valueType == "table" and #value > 0) then
-		Utilities.GBWarn("Value for ".. source .." marker \"".. markerType.."\" should be a key-value dictionary, number, or nil.\n".. usageStr)
+	local valueType = type(value)
+	if valueType == "table" and #value > 0 then -- Array check
+		Utilities.GBWarn("Value argument for ".. source .." marker \"".. markerType.."\" should not be an array. Use a dictionary instead.")
 		return
+	end
+
+	if value ~= nil and ALLOWED_VALUE_TYPES[valueType] == nil then
+		Utilities.GBWarn("Value argument for ".. source .." marker \"".. markerType.."\" be a primitive type or dictionary, got: ".. valueType)
+  		return
+	end
+
+	if value ~= nil and valueType ~= "table" then
+		value = { value = value } -- Wrap non-table values in a table
 	end
 	
 	-- Interface allows for player instance or userId. We already validated args types, so just handle accordingly.
