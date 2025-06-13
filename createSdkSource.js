@@ -4,16 +4,12 @@ const path = require('path');
 
 const redis = new Redis();
 
-function parseDirectory(dirPath, deep) {
+function parseDirectory(dirPath) {
   const result = {};
 
   const items = fs.readdirSync(dirPath, { withFileTypes: true });
 
   for (const item of items) {
-    if (!deep) {
-
-        console.log(`Processing: ${item.name}`); // Log the item being processed
-    }
     const fullPath = path.join(dirPath, item.name);
 
     if (item.isDirectory()) {
@@ -27,8 +23,7 @@ function parseDirectory(dirPath, deep) {
   return result;
 }
 
-// Replace './src' with the root directory you want to parse
-const rootDir = process.cwd() + "/src"; // Use current working directory
+const rootDir = process.cwd() + "/src";
 const parsed = parseDirectory(rootDir);
 
 redis.set("latestSdkSourceCode", JSON.stringify({"worked" : true, "source" : parsed}, null))
