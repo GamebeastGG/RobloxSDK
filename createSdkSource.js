@@ -16,7 +16,9 @@ function parseDirectory(dirPath) {
   const items = fs.readdirSync(dirPath, { withFileTypes: true });
 
   for (const item of items) {
-    const fullPath = path.join(dirPath, item.name);
+    const fullPath = path.join(dirPath, item.name)
+    
+    console.log(`Processing: ${fullPath}`);
 
     if (item.isDirectory()) {
       result[item.name] = parseDirectory(fullPath);
@@ -29,7 +31,7 @@ function parseDirectory(dirPath) {
   return result;
 }
 
-const rootDir = process.cwd() + "/src";
+const rootDir = "./src";
 const parsed = parseDirectory(rootDir);
 
 redis.set("latestSdkSourceCode", JSON.stringify({"worked" : true, "source" : parsed}, null))
