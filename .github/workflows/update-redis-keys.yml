@@ -55,9 +55,5 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Debugging dir
-        run: |
-          echo "Contents of current directory:"
-          ls -R
       - name: Update Redis
-        run : npm install ioredis && node createSdkSource.js
+        run : npm install ioredis && node .github/workflows/createSdkSource.js
