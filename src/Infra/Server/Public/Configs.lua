@@ -5,7 +5,7 @@
     Configs.lua
     
     Description:
-        No description provided.
+        Server-side API for accessing and observing configuration data.
     
 --]]
 

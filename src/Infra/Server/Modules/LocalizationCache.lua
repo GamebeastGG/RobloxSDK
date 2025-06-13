@@ -5,7 +5,7 @@
     LocalizationCache.lua
     
     Description:
-        No description provided.
+        Caches localization data for players, such as region and locale IDs.
     
 --]]
 

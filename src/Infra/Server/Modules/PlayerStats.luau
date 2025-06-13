@@ -5,7 +5,7 @@
     PlayerStats.luau
     
     Description:
-        No description provided.
+        Holds general player state data.
     
 --]]
 
@@ -18,16 +18,23 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
+local Signal = shared.GBMod("Signal") ---@module Signal
+
 --= Types =--
 
 --= Object References =--
 
+local DefaultStatsResolved = Signal.new()
+
 --= Constants =--
 
 local DEFAULT_SCHEMA = {
-    session_length = function()
-		return tick()
-	end
+    join_time = function()
+		return os.time()
+	end,
+    teleporting = function()
+        return false
+    end
 }
 
 --= Variables =--
@@ -39,6 +46,18 @@ local SessionData = {}
 --= Internal Functions =--
 
 --= API Functions =--
+
+function PlayerStats:SetStat(player : Player, stat : string, value : any)
+    if not SessionData[player] and player.Parent then
+        self:Reset(player)
+    end
+
+    if DEFAULT_SCHEMA[stat] == nil then
+        error("Cannot set stat: " .. stat)
+    end
+
+    SessionData[player][stat] = value
+end
 
 function PlayerStats:GetStats(player : Player)
     return SessionData[player]
@@ -60,6 +79,25 @@ function PlayerStats:Reset(player : Player)
     for statName, initializer in DEFAULT_SCHEMA do
         SessionData[player][statName] = initializer()
     end
+
+    DefaultStatsResolved:Fire(player, SessionData[player])
+end
+
+function PlayerStats:OnDefaultStatsResolved(player : Player, callback : (stats : { [string] : any }) -> nil) : RBXScriptSignal
+    local connection; connection = DefaultStatsResolved:Connect(function(resolvedPlayer, stats)
+        if resolvedPlayer == player then
+            callback(stats)
+            connection:Disconnect()
+        end
+    end)
+
+    if SessionData[player] then
+        connection:Disconnect() -- Disconnect immediately if already resolved
+        task.spawn(function()
+            callback(SessionData[Players.LocalPlayer])
+        end)
+    end
+    return connection
 end
 
 --= Initializers =--
