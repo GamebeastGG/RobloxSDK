@@ -1,4 +1,4 @@
-name: Delete Redis Keys on PR Merge to Main
+name: Update Redis Keys on PR Merge to Main
 
 on:
   push:
@@ -39,23 +39,13 @@ jobs:
 
       - name: Set up SSH SOCKS proxy
         env:
-          REDIS_HOST: 10.128.15.192
+          REDIS_HOST: 10.128.0.62
         run: |
-          gcloud beta compute ssh proxy-prod-cluster \
+          gcloud beta compute ssh proxy-stage-cluster \
             --project x-cycling-414419 \
             --zone us-central1-a \
             --tunnel-through-iap \
             --ssh-flag="-4 -L 6379:$REDIS_HOST:6379 -N -q -f"
 
-      - name: Install Redis CLI
-        run: sudo apt-get update && sudo apt-get install -y redis-tools
-
-      - name: Delete Redis latestSdkSourceCode Key
-        run: |
-          echo "Connecting to Redis at 127.0.0.1:6379"
-          timeout 15s redis-cli -c -h 127.0.0.1 -p 6379 DEL latestSdkSourceCode || echo "Failed to delete latestSdkSourceCode"
-
-      - name: Delete Redis latestSdkVersion Key
-        run: |
-          echo "Connecting to Redis at 127.0.0.1:6379"
-          timeout 15s redis-cli -c -h 127.0.0.1 -p 6379 DEL latestSdkVersion || echo "Failed to delete latestSdkVersion"
+      - name: Update Redis
+        run : npm install ioredis && node .github/workflows/createSdkSource.js
