@@ -175,7 +175,7 @@ function RequestFunctionHandler:ExecuteRequests(requests : {})
                             return
                         end
 
-                        local success, data = pcall(requestFunc, request)
+                        local success, data = pcall(requestFunc, request.args)
 
                         if not success then
                             AddResult(false, request.requestId, {details=data})
@@ -204,7 +204,7 @@ function RequestFunctionHandler:ExecuteRequests(requests : {})
                     end
 
                     -- Either run relevant function in its own thread or (potentially) yield and run sequentially as determined by request details
-                    if request.details.async then
+                    if request.details.async or request.details.custom then
                         task.spawn(performRequest)
                     else
                         performRequest()

@@ -25,8 +25,7 @@ local requestFunctions = {}
 requestFunctions.funcs = {
 	-- host_only: true
 	-- async: true
-	["Ban"] = function(request)
-		local args = request.args
+	["Ban"] = function(args)
 		local userIdentifier = args.user_identifier
 		local success
 		
@@ -39,7 +38,7 @@ requestFunctions.funcs = {
 			
 			-- If the service failed, we can't proceed
 			if not success then
-				shared.GBMod("GBRequests"):SendFailure(request)
+				error("Failed to resolve userId")
 				return
 			end
 		else
@@ -62,8 +61,7 @@ requestFunctions.funcs = {
 	
 	-- host_only: true
 	-- async: true
-	["Unban"] = function(request)
-		local args = request.args
+	["Unban"] = function(args)
 		local userIdentifier = args.user_identifier
 		local success
 
@@ -76,7 +74,7 @@ requestFunctions.funcs = {
 
 			-- If the service failed, we can't proceed
 			if not success then
-				shared.GBMod("GBRequests"):SendFailure(request)
+				error("Failed to resolve userId")
 				return
 			end
 		else
@@ -96,8 +94,7 @@ requestFunctions.funcs = {
 	
 	-- host_only: false
 	-- async: true
-	["Kick"] = function(request)
-		local args = request.args
+	["Kick"] = function(args)
 		local userIdentifier = args.user_identifier
 		-- We support UserIds + usernames from the dashboard
 		if tonumber(userIdentifier) then
@@ -126,38 +123,24 @@ requestFunctions.funcs = {
 	
 	-- host_only: false
 	-- async: false
-	["UpdateConfigs"] = function(request)
-		Utilities.GBLog("Received config update request", request)
-		Updater:UpdateConfigs(request.args)
+	["UpdateConfigs"] = function(args)
+		Utilities.GBLog("Received config update request")
+		Updater:UpdateConfigs(args)
 	end;
 
 	-- host_only: false
 	-- async: false
-	["PropagateAvailableExperiments"] = function (request)
-		Utilities.GBLog("Received experiment update request", request)
-		Experiments:UpdateStateFromAvailableExperiments(request.args)
+	["PropagateAvailableExperiments"] = function (args)
+		Utilities.GBLog("Received experiment update request")
+		Experiments:UpdateStateFromAvailableExperiments(args)
 	end,
 
 	-- host_only: false
 	-- async: false
-	["PropagateExperimentReassignment"] = function (request)
-		Utilities.GBLog("Received experiment reassignment request", request)
-		Experiments:ProcessExperimentReassignmentRequest(request.args)
-	end,
-
-	
-	-- Not yet implemented
-	--["CustomJob"] = function(request)
-	--	local res, success = utilities.promiseReturn(0, function()
-	--		shared.GBMod("CustomJobs").executeCustomJob(request.args)
-	--	end)
-		
-	--	if success then
-	--		shared.GBMod("GBRequests"):SendFailure(request)
-	--	else
-	--		shared.GBMod("GBRequests"):SendSuccess(request, {res})
-	--	end
-	--end;
+	["PropagateExperimentReassignment"] = function (args)
+		Utilities.GBLog("Received experiment reassignment request")
+		Experiments:ProcessExperimentReassignmentRequest(args)
+	end
 }
 
 return requestFunctions
