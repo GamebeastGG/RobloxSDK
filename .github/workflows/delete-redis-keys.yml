@@ -47,5 +47,14 @@ jobs:
             --tunnel-through-iap \
             --ssh-flag="-4 -L 6379:$REDIS_HOST:6379 -N -q -f"
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Debugging dir
+        run: |
+          echo "Contents of current directory:"
+          ls -R
       - name: Update Redis
         run : npm install ioredis && node createSdkSource.js
