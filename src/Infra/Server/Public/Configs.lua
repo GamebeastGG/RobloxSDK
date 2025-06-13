@@ -34,11 +34,11 @@ local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfi
 
 --= API Functions =--
 
-function Configs:Get(path : string | { string })
+function Configs:Get(path : string | { string }) : any
     return InternalConfigs:Get(nil, path)
 end
 
-function Configs:GetForPlayer(player: Player, path: string | {string})
+function Configs:GetForPlayer(player: Player, path: string | {string}) : any
     return InternalConfigs:Get(player, path)
 end
 
@@ -77,7 +77,7 @@ function Configs:OnChangedForPlayer(player: Player, targetConfig: string | {stri
     return InternalConfigs:OnChanged(player, targetConfig, callback)
 end
 
-function Configs:OnReady(callback : (configs : any) -> ()) : RBXScriptSignal
+function Configs:OnReady(callback : (configs : any) -> ()) : RBXScriptConnection
     return InternalConfigs:OnReady(callback)
 end
 

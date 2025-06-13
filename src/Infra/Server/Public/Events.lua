@@ -37,11 +37,11 @@ function Events:GetEventData(eventName : string)
     return InternalConfigs:GetEventData(eventName)
 end
 
-function Events:OnStart(eventName : string, callback : (eventInfo : { [string] : any }) -> ()) : RBXScriptSignal
+function Events:OnStart(eventName : string, callback : (eventInfo : { [string] : any }) -> ()) : RBXScriptConnection
     return EventsManager:OnStart(eventName, callback)
 end
 
-function Events:OnEnd(eventName : string, callback : (eventInfo : { [string] : any }) -> ()) : RBXScriptSignal
+function Events:OnEnd(eventName : string, callback : (eventInfo : { [string] : any }) -> ()) : RBXScriptConnection
     return EventsManager:OnEnd(eventName, callback)
 end
 

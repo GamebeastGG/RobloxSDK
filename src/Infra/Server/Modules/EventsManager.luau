@@ -55,7 +55,7 @@ end
 
 --= API Functions =--
 
-function EventsManager:OnStart(eventName : string, callback : (eventInfo : { [string] : any }) -> ()) : RBXScriptSignal
+function EventsManager:OnStart(eventName : string, callback : (eventInfo : { [string] : any }) -> ()) : RBXScriptConnection
 	return EventStartedSignal:Connect(function(name, info)
 		if name == eventName then
 			callback(info)
@@ -63,7 +63,7 @@ function EventsManager:OnStart(eventName : string, callback : (eventInfo : { [st
 	end)
 end
 
-function EventsManager:OnEnd(eventName : string, callback : (eventInfo : { [string] : any }) -> ()) : RBXScriptSignal
+function EventsManager:OnEnd(eventName : string, callback : (eventInfo : { [string] : any }) -> ()) : RBXScriptConnection
 	return EventEndedSignal:Connect(function(name, info)
 		if name == eventName then
 			callback(info)

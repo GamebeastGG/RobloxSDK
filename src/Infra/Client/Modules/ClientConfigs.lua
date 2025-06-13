@@ -110,7 +110,7 @@ function ClientConfigs:OnChanged(targetConfig : string | {string}, callback : (n
     end)
 end
 
-function ClientConfigs:OnReady(callback : (configs : any) -> ()) : RBXScriptSignal
+function ClientConfigs:OnReady(callback : (configs : any) -> ()) : RBXScriptConnection
     return ConfigReadySignal:Connect(function()
         callback(CachedConfigs)
     end)
