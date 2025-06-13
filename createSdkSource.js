@@ -31,7 +31,19 @@ function parseDirectory(dirPath) {
   return result;
 }
 
-const rootDir = "./src";
-const parsed = parseDirectory(rootDir);
+(async () => {
+  const rootDir = process.cwd() + "/src";
+  const parsed = parseDirectory(rootDir);
 
-redis.set("latestSdkSourceCode", JSON.stringify({"worked" : true, "source" : parsed}, null))
+  const output = JSON.stringify({ worked: true, source: parsed });
+  console.log('Payload size (bytes):', Buffer.byteLength(output));
+
+  try {
+    const result = await redis.set("latestSdkSourceCode", output);
+    console.log('Redis SET result:', result);
+    process.exit(0);
+  } catch (err) {
+    console.error('Redis SET failed:', err);
+    process.exit(1);
+  }
+})();
