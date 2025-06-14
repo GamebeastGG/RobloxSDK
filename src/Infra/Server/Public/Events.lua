@@ -5,7 +5,7 @@
     Events.lua
     
     Description:
-        No description provided.
+        Public API for managing definined events.
     
 --]]
 

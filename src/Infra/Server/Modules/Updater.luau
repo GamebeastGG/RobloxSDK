@@ -8,7 +8,10 @@
 	Updater.luau
 	
 	Description:
-		No description provided.
+		Handles updating the internal configurations of the Gamebeast SDK
+		based on the latest configurations received from the Gamebeast server.
+		It also manages experiment assignments and applies configurations
+		to players and the server.
 	
 --]]
 

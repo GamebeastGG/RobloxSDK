@@ -5,7 +5,7 @@
 	EventsManager.luau
 	
 	Description:
-		No description provided.
+		Handles the management of defined events, including starting and ending events based on time.
 	
 --]]
 
