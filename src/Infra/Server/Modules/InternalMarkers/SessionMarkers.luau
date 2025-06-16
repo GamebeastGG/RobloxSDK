@@ -18,6 +18,7 @@ local SessionMarkers = { }
 
 local Players = game:GetService("Players")
 local PolicyService = game:GetService("PolicyService")
+local AssetService = game:GetService("AssetService")
 
 --= Dependencies =--
 
@@ -36,7 +37,7 @@ local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@modu
 --= Variables =--
 
 local LastCharPositions = {}
-
+local PlacesInUniverse = {}
 
 --= Public Variables =--
 
@@ -88,7 +89,8 @@ function SessionMarkers:Init()
 			["sessionLengthPercentageWithFriends"] = if friendPlaytimePercent then Utilities.roundNum(friendPlaytimePercent/sessionLength, 0.01) else nil
 		}
 
-		if ServerClientInfoHandler:IsClientInfoResolved(player) == true and PlayerStats:GetStat(player, "teleporting") == true then
+		local teleportingToPlace = PlayerStats:GetStat(player, "teleporting_to")
+		if ServerClientInfoHandler:IsClientInfoResolved(player) == true and teleportingToPlace and PlacesInUniverse[teleportingToPlace] then
 			-- If the player was teleporting, we don't send a Logout marker
 			return
 		end
@@ -96,6 +98,32 @@ function SessionMarkers:Init()
 		-- Send Logout marker with relevant info
 		EngagementMarkers:SDKMarker("Logout", args, {player = player, position = position})
 	end)
+
+	task.spawn(function()
+		-- Collect all places in the universe for sessionId preservation
+		local success, err = pcall(function()
+			local placesPages = AssetService:GetGamePlacesAsync()
+			while true do
+				-- Wait for the places to be loaded
+				for _, place in pairs(placesPages:GetCurrentPage()) do
+					if not PlacesInUniverse[place.PlaceId] then
+						PlacesInUniverse[place.PlaceId] = place
+					end
+				end
+
+				if placesPages.IsFinished then
+					break
+				else
+					placesPages:AdvanceToNextPageAsync()
+				end
+			end
+		end)
+
+		if not success then
+			Utilities.GBWarn("Failed to get places in universe:", err)
+		end
+	end)
+	
 end
 
 --= Return Module =--

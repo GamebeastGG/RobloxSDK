@@ -19,6 +19,7 @@ local Players = game:GetService("Players")
 --= Dependencies =--
 
 local Signal = shared.GBMod("Signal") ---@module Signal
+local Schema = shared.GBMod("Schema") ---@module Schema
 
 --= Types =--
 
@@ -28,14 +29,14 @@ local DefaultStatsResolved = Signal.new()
 
 --= Constants =--
 
-local DEFAULT_SCHEMA = {
-    join_time = function()
-		return os.time()
-	end,
-    teleporting = function()
-        return false
-    end
-}
+local DEFAULT_SCHEMA = Schema.new({
+    join_time = { default = function()
+        return os.time()
+    end, type = "number" },
+    teleporting_to = { default = function()
+        return nil 
+    end, type = {"number", "nil"} }
+})
 
 --= Variables =--
 
@@ -52,7 +53,7 @@ function PlayerStats:SetStat(player : Player, stat : string, value : any)
         self:Reset(player)
     end
 
-    if DEFAULT_SCHEMA[stat] == nil then
+    if not DEFAULT_SCHEMA:HasKey(stat) then
         error("Cannot set stat: " .. stat)
     end
 
@@ -75,10 +76,7 @@ function PlayerStats:Clear(player : Player)
 end
 
 function PlayerStats:Reset(player : Player)
-    SessionData[player] = {}
-    for statName, initializer in DEFAULT_SCHEMA do
-        SessionData[player][statName] = initializer()
-    end
+    SessionData[player] = DEFAULT_SCHEMA:GetDefault()
 
     DefaultStatsResolved:Fire(player, SessionData[player])
 end
@@ -116,8 +114,9 @@ function PlayerStats:Init()
     -- Because various modules might rely on this state, it's not safe for them to call clearPlayerSessionData themselves.
     -- Run with delay to allow time to process and then clear to avoid memory leaks. Not likely worth doing some fancy dependency/roll call system.
     Players.PlayerRemoving:Connect(function(player)
-        task.wait(3)
-        self:Clear(player)
+        task.defer(function()
+            self:Clear(player)
+        end)
     end)
 end
 

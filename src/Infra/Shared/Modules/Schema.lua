@@ -30,8 +30,21 @@ Schema.__index = Schema
 
 --= Constructor =--
 
-function Schema.new(structure : {[string] : {default : any | () -> any, type : string}})
+function Schema.new(structure : {[string] : {default : any | () -> any, type : string | {string}}})
     local self = setmetatable({}, Schema)
+
+    for _, valueSchema in structure do
+        if type(valueSchema.type) == "string" then
+            valueSchema.type = {valueSchema.type} -- Ensure type is a table of types
+        end
+
+        local dictonary = {}
+        for _, typeName in ipairs(valueSchema.type) do
+            dictonary[typeName] = true -- Create a dictionary for fast type checking
+        end
+
+        valueSchema.type = dictonary
+    end
 
     self._structure = structure
 
@@ -77,7 +90,7 @@ function Schema:Sanitize(data : {[string] : any})
             data[key] = nil -- Remove keys not in the schema
         end
 
-        if self._structure[key].type ~= value.type then
+        if not self._structure[key].type[type(value)] then
             data[key] = nil -- Remove keys with incorrect type
         end
     end

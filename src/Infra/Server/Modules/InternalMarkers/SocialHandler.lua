@@ -89,14 +89,14 @@ function SocialHandler:Init()
         end))
 
         local activeTeleportCount = 0
-        player.OnTeleport:Connect(function(teleportState)
+        player.OnTeleport:Connect(function(teleportState, placeId)
             if teleportState == Enum.TeleportState.RequestedFromServer then
-                PlayerStats:SetStat(player, "teleporting", true)
+                PlayerStats:SetStat(player, "teleporting_to", placeId)
                 activeTeleportCount += 1
             elseif teleportState == Enum.TeleportState.Failed then
                 activeTeleportCount -= 1
                 if activeTeleportCount <= 0 then
-                    PlayerStats:SetStat(player, "teleporting", false)
+                    PlayerStats:SetStat(player, "teleporting_to", nil)
                 end
             end
         end)

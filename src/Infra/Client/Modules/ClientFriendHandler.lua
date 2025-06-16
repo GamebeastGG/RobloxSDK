@@ -41,7 +41,7 @@ local function UpdateFriendCache()
     local success, errorMessage = pcall(function() -- Minimizes internal HTTP requests
         local friendsList = Players:GetFriendsAsync(Players.LocalPlayer.UserId)
         
-        repeat
+        while true do
             local list = friendsList:GetCurrentPage()
             for _, friend in ipairs(list) do
                 if Players:GetPlayerByUserId(friend.Id) then
@@ -50,10 +50,12 @@ local function UpdateFriendCache()
                 FriendCache[friend.Id] = true
             end
 
-            if not friendsList.IsFinished then
+            if friendsList.IsFinished then
+                break
+            else
                 friendsList:AdvanceToNextPageAsync()
             end
-        until friendsList.IsFinished
+        end
     end)
 
     -- client only sends initial total time and friends online count
