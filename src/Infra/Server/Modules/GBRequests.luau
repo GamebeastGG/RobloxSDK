@@ -31,7 +31,7 @@ local MetaData = shared.GBMod("MetaData") ---@module MetaData
 local URL_SUFFIX = "/sdk"
 local ENDPOINTS = {
 	{ 
-		URL = "https://api.gamebeast.gg" .. URL_SUFFIX, -- http://localhost:3001 -- https://api.gamebeast.gg -- https://api.stage.gamebeast.gg
+		URL = "https://api.gamebeast.gg", -- http://localhost:3001 -- https://api.gamebeast.gg -- https://api.stage.gamebeast.gg
 		Requests = { -- NOTE: If you require URL parameters, use {param} in the route string. Example: "v1/servers/roblox/{serverId}"
 			["v1/markers"] = "POST",
 			["v1/requests"] = "GET",
@@ -70,7 +70,7 @@ local function GetEndpointForRequest(requestRoute : string) : (string?, string?)
 			end
 		end
 
-		return endpoint.URL, current["__method"]
+		return ((DataCache:Get("Settings").customUrl or endpoint.URL)..URL_SUFFIX), current["__method"]
 	end
 end
 
