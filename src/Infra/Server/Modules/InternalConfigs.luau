@@ -5,7 +5,7 @@
 	InternalConfigs.luau
 	
 	Description:
-		No description provided.
+		Internal module for managing configuration data across the server and clients.
 	
 --]]
 

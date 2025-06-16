@@ -11,15 +11,12 @@ local MessagingServiceDebugCache = {} :: {[string] : number}
 local utilities = {}
 
 -- Central function for warning messages across SDK. Indicates Gamebeast as warning source and allows for output settings.
-utilities.GBWarn = function(message)
+utilities.GBWarn = function(...)
 	if DataCache:Get("Settings").sdkWarningsEnabled then
+		warn("GamebeastSDK:", ...)
 		if DataCache:Get("Settings").includeWarningStackTrace then
-			message = debug.traceback("GamebeastSDK: ".. message)
-		else
-			message = "GamebeastSDK: ".. message
+			warn("GamebeastSDK Traceback:", debug.traceback())
 		end
-		
-		warn(message)
 	end
 end
 

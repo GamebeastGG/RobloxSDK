@@ -5,7 +5,7 @@
     ClientConfigs.lua
     
     Description:
-        No description provided.
+        Internal module for managing client-side configuration data.
     
 --]]
 

@@ -5,7 +5,7 @@
 	EngagementMarkers.luau
 	
 	Description:
-		No description provided.
+		Handles processing and sending engagement markers to the Gamebeast backend.
 	
 --]]
 
@@ -35,8 +35,6 @@ local Experiments = shared.GBMod("Experiments") ---@module Experiments
 
 --= Object References =--
 
-local FireMarkerEvent = GetRemote("Event", "FireMarker")
-
 --= Constants =--
 
 local CLIENT_DATA_TIMEOUT = RunService:IsStudio() and 10 or 45
@@ -44,7 +42,6 @@ local MAX_EVENT_QUEUE_SIZE = 1000
 local QUEUE_CHECK_TIME = 5
 local MAX_EVENT_REPORT_TIME = 10
 local SYSTEM_MARKERS = {
-	["Died"] = true,
 	["Logout"] = true,
 	["Login"] = true,
 	["Purchase"] = true,
@@ -76,6 +73,7 @@ local ClientInfoWarned = false
 local function GetSessionIdForPlayer(player) : string?
 	if SessionIds[player] == nil and player.Parent then
 		SessionIds[player] = HttpService:GenerateGUID(false)
+		ServerClientInfoHandler:UpdateClientData(player, "sessionId", SessionIds[player])
 	end
 
 	return SessionIds[player]
@@ -164,7 +162,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		["timestamp"] = metaData.timestampOverride or DateTime.now().UnixTimestampMillis,
 		["type"] = markerType,
 		["userId"] = player and player.UserId, 
-		["sessionId"] = player and GetSessionIdForPlayer(player),
+		["sessionId"] = nil, -- Resolved later
 		["value"] = value,
 		["properties"] = {
 			["sdkPlatform"] = "roblox",
@@ -211,6 +209,18 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			entry.properties.device = ServerClientInfoHandler:GetClientInfo(player, "device")
 			entry.properties.deviceSubType = ServerClientInfoHandler:GetClientInfo(player, "deviceSubType")
 			entry.properties.inputType = ServerClientInfoHandler:GetClientInfo(player, "inputType")
+
+			-- Attempt to resolve session ID from client info so we preserve it across game sessions.
+			local sessionId = ServerClientInfoHandler:GetClientInfo(player, "sessionId")
+			if sessionId and sessionId ~= "" then
+				entry.sessionId = sessionId
+				if player.Parent then
+					SessionIds[player] = sessionId
+				end
+			else
+				entry.sessionId = GetSessionIdForPlayer(player)
+			end
+
 			addMarker()
 
 			-- Remove from waiting list if it exists
