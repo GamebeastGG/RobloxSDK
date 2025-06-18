@@ -50,6 +50,7 @@ local DEFAULT_SETTINGS = {
 	sdkWarningsEnabled = true,
 	includeWarningStackTrace = false,
 	sdkDebugEnabled = false,
+	customUrl = nil, -- Custom domain for the SDK, if any
 }
 
 --= Object References =--

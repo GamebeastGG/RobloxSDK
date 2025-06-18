@@ -5,6 +5,8 @@ type SDKSettings = {
 	includeWarningStackTrace : boolean,
 	-- Enables SDK debug messages for internal state changes, etc.
 	sdkDebugEnabled : boolean,
+	-- Custom URL for the SDK, if any.
+	customUrl : string | nil,
 }
 export type ServerSetupConfig = {
 	key : string | Secret,
