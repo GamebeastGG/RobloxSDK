@@ -92,11 +92,17 @@ function SessionMarkers:Init()
 		local teleportingToPlace = PlayerStats:GetStat(player, "teleporting_to")
 		if ServerClientInfoHandler:IsClientInfoResolved(player) == true and teleportingToPlace and PlacesInUniverse[teleportingToPlace] then
 			-- If the player was teleporting, we don't send a Logout marker
-			return
+			EngagementMarkers:SDKMarker("PlaceTeleport", {
+					sourcePlaceId = game.PlaceId,
+					destinationPlaceId = teleportingToPlace,
+					sessionLength = Utilities.roundNum(os.time() - PlayerStats:GetStat(player, "join_time"), 0.1)
+				}, 
+				{player = player, position = position}
+			)
+		else
+			-- Send Logout marker with relevant info
+			EngagementMarkers:SDKMarker("Logout", args, {player = player, position = position})
 		end
-
-		-- Send Logout marker with relevant info
-		EngagementMarkers:SDKMarker("Logout", args, {player = player, position = position})
 	end)
 
 	task.spawn(function()
