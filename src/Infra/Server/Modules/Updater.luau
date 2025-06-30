@@ -19,25 +19,22 @@
 local Updater = { }
 
 --= Roblox Services =--
-local DataStoreService = game:GetService("DataStoreService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
 local GBRequests = shared.GBMod("GBRequests")
-local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module EngagementMarkers
 local Experiments = shared.GBMod("Experiments") ---@module Experiments
 local Utilities = shared.GBMod("Utilities")
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
 local Signal = shared.GBMod("Signal")
+local DatatstoreBackup = shared.GBMod("DatastoreBackup") ---@module DatastoreBackup
 local MetaData = shared.GBMod("MetaData") ---@module MetaData
 
 --= Types =--
 
 --= Constants =--
-
-local BACKUP_STORE_KEY = (RunService:IsStudio() and "Studio" or "") .. "GBConfigBackup"
 
 --[[
 	When config is being applied, this controls the maximum amount of seconds
@@ -50,8 +47,6 @@ local BACKUP_STORE_KEY = (RunService:IsStudio() and "Studio" or "") .. "GBConfig
 local MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME = 5
 
 --= Object References =--
-
-local BackupConfigStore = DataStoreService:GetDataStore(BACKUP_STORE_KEY)
 
 --= Variables =--
 
@@ -146,9 +141,7 @@ end
 
 -- In the unlikely case GB is down, fall back on Roblox datastores
 function Updater:GetBackupConfigs()
-	local configs, success = Utilities.promiseReturn(2, function()
-		return BackupConfigStore:GetAsync(BACKUP_STORE_KEY)
-	end)
+	local success, configs = DatatstoreBackup:Get("Configs")
 	
 	if not success then
 		Utilities.GBWarn("Couldn't get configs from backup. Attempting to re-establish connection with Gamebeast...")
@@ -168,9 +161,7 @@ function Updater:SaveConfigsToBackup(newConfigs)
 	local newBackupConfigs = Utilities.recursiveCopy(newConfigs)
 	newBackupConfigs.GBConfigs.Experiments = nil
 
-	Utilities.promiseReturn(1, function()
-		BackupConfigStore:SetAsync(BACKUP_STORE_KEY, newBackupConfigs)
-	end)
+	DatatstoreBackup:Set("Configs", newBackupConfigs)
 end
 
 

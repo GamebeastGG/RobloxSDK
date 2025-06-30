@@ -38,8 +38,6 @@ local ENDPOINTS = {
 			["v1/requests/completed"] = "POST",
 			["v1/requests/started"] = "PUT",
 			["v1/configurations"] = "GET",
-			["v1/heatmap"] = "POST",
-			["v1/heatmap/waypoint"] = "POST",
 			["v1/latest/version?platform=roblox"] = "GET",
 			["v1/experiments/assignments"] = "POST",
 			["v1/servers/roblox/{serverId}"] = "POST"
@@ -116,8 +114,15 @@ end
 
 --YEILDS 
 function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any}, maxRetries : number?) : (boolean, any?)
-	RequestProcessingCount += 1
 	local GBDomain, requestMethod = GetEndpointForRequest(requestRoute)
+	
+	if not GBDomain or not requestMethod then
+		Utilities.GBWarn("Invalid request route:", requestRoute)
+		return false, nil
+	end
+
+	RequestProcessingCount += 1
+
 	local requestBody
 	args = args or {}
 
