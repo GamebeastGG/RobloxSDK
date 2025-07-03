@@ -18,13 +18,15 @@ local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
+local Key = shared.GBMod("Key") ---@module Key
+
 --= Types =--
 
 --= Constants =--
-local BACKUP_STORE_KEY = (RunService:IsStudio() and "Studio" or "") .. "_Gamebeast_Backup"
+local BACKUP_STORE_KEY = Key.new((RunService:IsStudio() and "Studio" or "") .. "_Gamebeast_Backup")
 
 --= Object References =--
-local BackupConfigStore = DataStoreService:GetDataStore(BACKUP_STORE_KEY)
+local BackupConfigStore = DataStoreService:GetDataStore(BACKUP_STORE_KEY:Get())
 
 --= Variables =--
 

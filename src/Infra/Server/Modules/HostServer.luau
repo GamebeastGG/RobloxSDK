@@ -21,6 +21,7 @@ local RunService = game:GetService("RunService")
 --= Dependencies =--
 
 local Utilities = shared.GBMod("Utilities") ---@module Utilities
+local Key = shared.GBMod("Key") ---@module Key
 
 --= Types =--
 
@@ -29,9 +30,9 @@ local Utilities = shared.GBMod("Utilities") ---@module Utilities
 --= Constants =--
 
 -- Messaging service topics for cross server communication
-local HOST_HEARTBEAT_TOPIC = "GB_HOST_HEARTBEAT"
-local SERVER_SHUTDOWN_TOPIC = "GB_SERVER_SHUTDOWN"
-local SERVER_STARTUP_TOPIC = "GB_SERVER_STARTUP"
+local HOST_HEARTBEAT_TOPIC = Key.new("GB_HOST_HEARTBEAT")
+local SERVER_SHUTDOWN_TOPIC = Key.new("GB_SERVER_SHUTDOWN")
+local SERVER_STARTUP_TOPIC = Key.new("GB_SERVER_STARTUP")
 -- How often we check if no host exists and resolve
 local HEARTBEAT_INTERVAL = 10
 
@@ -55,7 +56,7 @@ end
 
 local function SendHeartbeat()
 	LastHeartbeatSent = os.time()
-	Utilities.publishMessage(HOST_HEARTBEAT_TOPIC, {Source = game.JobId})
+	Utilities.publishMessage(HOST_HEARTBEAT_TOPIC:Get(), {Source = game.JobId})
 end
 
 --= API Functions =--
@@ -95,7 +96,7 @@ function HostServer:Init()
 
 	-- If ping is received on this channel and it is not from ourself, then another host server exists and we relinquish role
 	local success, reason = pcall(function()
-		MessagingService:SubscribeAsync(HOST_HEARTBEAT_TOPIC, function(message : {Sent : number, Data : {Source : string}})
+		MessagingService:SubscribeAsync(HOST_HEARTBEAT_TOPIC:Get(), function(message : {Sent : number, Data : {Source : string}})
 			if message.Data.Source == game.JobId then return end
 
 			LastHeartbeatTick = tick()
@@ -108,13 +109,13 @@ function HostServer:Init()
 	end)
 	
 	Utilities.promiseReturn(1, function()
-		MessagingService:SubscribeAsync(SERVER_STARTUP_TOPIC, function()
+		MessagingService:SubscribeAsync(SERVER_STARTUP_TOPIC:Get(), function()
 			ServersSinceStartup += 1
 		end)
 	end)
 
 	Utilities.promiseReturn(1, function()
-		MessagingService:SubscribeAsync(SERVER_SHUTDOWN_TOPIC, function(message)
+		MessagingService:SubscribeAsync(SERVER_SHUTDOWN_TOPIC:Get(), function(message)
 			if message.Data < ServersSinceStartup then
 				ServersSinceStartup = math.max(ServersSinceStartup - 1, 0)
 			end
@@ -136,10 +137,10 @@ function HostServer:Init()
 				return
 			end
 
-			Utilities.publishMessage(SERVER_SHUTDOWN_TOPIC, ServersSinceStartup)
+			Utilities.publishMessage(SERVER_SHUTDOWN_TOPIC:Get(), ServersSinceStartup)
 		end)
 
-		Utilities.publishMessage(SERVER_STARTUP_TOPIC, true)
+		Utilities.publishMessage(SERVER_STARTUP_TOPIC:Get(), true)
 		self:CheckHostServerActive()
 	else
 		Utilities.GBWarn("Failed to subscribe to host heartbeat topic, starting rogue host server with reason: ".. reason)

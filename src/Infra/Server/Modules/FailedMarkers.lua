@@ -23,13 +23,14 @@ local DataStoreService = game:GetService("DataStoreService")
 --= Dependencies =--
 
 local Utilities = shared.GBMod("Utilities") ---@module Utilities
+local Key = shared.GBMod("Key") ---@module Key
 
 --= Types =--
 
 --= Object References =--
 
-local MarkersDataStore = DataStoreService:GetDataStore("GB_FailedMarkers")
-local OrderedMarkersDataStore = DataStoreService:GetOrderedDataStore("GB_FailedMarkers")
+local MarkersDataStore = DataStoreService:GetDataStore(Key.new("GB_FailedMarkers"):Get())
+local OrderedMarkersDataStore = DataStoreService:GetOrderedDataStore(Key.new("GB_FailedMarkers"):Get())
 
 --= Constants =--
 

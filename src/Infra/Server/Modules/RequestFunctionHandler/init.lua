@@ -274,7 +274,7 @@ function RequestFunctionHandler:Init()
 	task.spawn(function()
 		local function checkForRequests()
 			-- Only host should be asking for requests
-			if not shared.GBMod("HostServer"):IsHostServer() then return end
+			if not HostServer:IsHostServer() then return end
 
 			-- Get requests from Gamebeast. Soon-to-be legacy?
 			local success, newRequests = GBRequests:GBRequestAsync("v1/requests")

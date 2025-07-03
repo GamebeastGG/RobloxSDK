@@ -61,6 +61,7 @@ local Modules = {} :: { [string] : ModuleData }
 local PublicModules = {} :: { [string] : ModuleData }
 local Initializing = false
 local DidRequire = false
+local SDKId = 0
 local IsServer = RunService:IsServer()
 
 --= Internal Functions =--
@@ -163,6 +164,19 @@ local function StartSDK()
 	local dataCacheModule = RequireModule(GetModule("DataCache"))
 	dataCacheModule:Set("Settings", table.clone(DEFAULT_SETTINGS))
 
+	--[[local getRemote = RequireModule(GetModule("GetRemote")) :: any
+	local getSdkIdRemote = getRemote("Function", "GetSdkId", true)
+
+	if IsServer then
+		getSdkIdRemote.OnServerInvoke = function()
+			return shared.GBMod
+		end
+	else
+		sh = getSdkIdRemote:InvokeServer()
+	end]]
+
+	dataCacheModule:Set("SdkId", SDKId)
+
 	-- Require all modules
 	for _, moduleData in (Modules) do
 		--local startTime = tick()
@@ -183,7 +197,7 @@ local function StartSDK()
 
 		local InitMethod = rawget(moduleData.Module, "Init")
 		if InitMethod then
-			task.spawn(InitMethod, moduleData.Module)
+			task.spawn(InitMethod, moduleData.Module, SDKId)
 		end
 	end
 end
@@ -236,13 +250,45 @@ end
 
 --= Initializers =--
 do
-	shared.GBMod = function(name : string)
+	local function requireFunction(name : string)
 		local moduleData = GetModule(name)
 		if moduleData then
 			return RequireModule(moduleData)
 		else
 			--Utilities.GBWarn("Gamebeast module \"".. name.. "\" not found!")
 		end
+	end
+
+	-- Logic for running multiple Gamebeast SDKs in the same game
+	if not shared.GBMod then
+		shared.GBMod = setmetatable({}, {
+			__call = function(self, name)
+				if #self == 1 then
+					return self[1].requirer(name)
+				end
+
+				local fullPath = debug.info(2, "s")
+
+				for _, loaderData in pairs(self) do
+					if string.sub(fullPath, 1, #loaderData.scriptName) ~= loaderData.scriptName then
+						continue
+					end
+
+					return loaderData.requirer(name)
+				end
+
+				error("No matching loader found for context: " .. fullPath)
+			end
+		})
+	end
+
+	table.insert(shared.GBMod, {
+		scriptName = script:GetFullName(),
+		requirer = requireFunction,
+	})
+
+	if IsServer then -- NOTE: Client asks for the ID in StartSDK() if needed.
+		SDKId += #shared.GBMod
 	end
 end
 

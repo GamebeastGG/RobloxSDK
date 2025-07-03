@@ -38,10 +38,11 @@ local IS_SERVER = RunService:IsServer()
 
 --= Return Module =--
 return function(remoteType : "Function" | "Event", name : string) : RemoteFunction | RemoteEvent
-    local remote = if IS_SERVER then RemotesFolder:FindFirstChild(remoteType..name) else RemotesFolder:WaitForChild(remoteType..name)
+    local remoteName = remoteType..name
+    local remote = if IS_SERVER then RemotesFolder:FindFirstChild(remoteName) else RemotesFolder:WaitForChild(remoteName)
 	if not remote then
 		remote = Instance.new("Remote"..remoteType, RemotesFolder)
-		remote.Name = remoteType..name
+		remote.Name = remoteName
 	end
 
 	return remote
