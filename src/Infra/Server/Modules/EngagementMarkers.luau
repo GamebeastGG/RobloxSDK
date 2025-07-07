@@ -120,7 +120,7 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 			markers = queue
 		}
 
-		if isCustomQueue then
+		if not isCustomQueue then
 			MarkerQueue = {}
 		end
 		
