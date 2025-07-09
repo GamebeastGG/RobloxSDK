@@ -1,7 +1,9 @@
 name: Update SDK Redis Keys
 
 on:
-  pull_request:
+  push:
+    branches:
+      - feat/actions-delete-redis-keys
   workflow_dispatch:
     inputs:
       target:
