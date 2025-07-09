@@ -31,6 +31,7 @@ export type ConfigsService = Types.ConfigsService
 export type MarkersService = Types.MarkersService
 export type JobsService = Types.JobsService
 export type EventsService = Types.EventsService
+export type ExperimentsService = Types.ExperimentsService
 
 type ModuleData = {
 	Name : string,
