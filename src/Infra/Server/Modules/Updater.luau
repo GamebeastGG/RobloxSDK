@@ -25,7 +25,7 @@ local RunService = game:GetService("RunService")
 --= Dependencies =--
 
 local GBRequests = shared.GBMod("GBRequests")
-local Experiments = shared.GBMod("Experiments") ---@module Experiments
+local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
 local Utilities = shared.GBMod("Utilities")
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
 local Signal = shared.GBMod("Signal")

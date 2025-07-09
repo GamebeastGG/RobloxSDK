@@ -50,7 +50,14 @@ export type EventsService = {
 	OnEnd : (self : EventsService, event : string, callback : (data : JSON) -> ()) -> RBXScriptConnection,
 }
 
+export type ExperimentsService = {
+	GetGroupForPlayer: (self: ExperimentsService, player: Player) -> ExperimentGroupMetadata?,
+}
+export type ExperimentGroupMetadata = {
+	experimentName: string,
+	groupName: string,
+}
 
-export type Service = ConfigsService | MarkersService | EventsService | JobsService
+export type Service = ConfigsService | MarkersService | EventsService | JobsService | ExperimentsService
 
 return true
