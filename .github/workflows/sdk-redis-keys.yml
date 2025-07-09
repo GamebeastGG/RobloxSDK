@@ -4,9 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Deployment target (dev, stage, or prod)'
+        type: choice
+        description: 'Deployment target'
         required: true
         default: 'dev'
+        options:
+          - dev
+          - stage
+          - prod
 
 jobs:
   update-redis-keys:
@@ -17,13 +22,6 @@ jobs:
       id-token: write
 
     steps:
-      - name: Validate target
-        if: ${{ !contains('dev,stage,prod', github.event.inputs.target) }}
-        run: |
-          echo "❌ Invalid target: ${{ github.event.inputs.target }}"
-          echo "    Allowed values are: dev, stage, prod"
-          exit 1
-
       - name: "Authenticate to Google Cloud"
         uses: "google-github-actions/auth@v2"
         with:
