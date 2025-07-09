@@ -203,9 +203,8 @@ function Updater:Init()
 				Utilities.GBWarn("Attempting to establish connection...")
 				newConfigs = fetchConfigs()
 			until newConfigs
-			print("Connection with Gamebeast re-established! Loading newest configs...")
-		else
-			print("Backup configs loaded successfully!")
+
+			Utilities.GBWarn("Connection established, fetching configurations...")
 		end
 	end
 
