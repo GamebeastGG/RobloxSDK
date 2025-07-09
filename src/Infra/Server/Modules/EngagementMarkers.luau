@@ -27,9 +27,9 @@ local GetRemote = shared.GBMod("GetRemote")
 local Utilities = shared.GBMod("Utilities")
 local HostServer = shared.GBMod("HostServer") ---@module HostServer
 local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
-local Experiments = shared.GBMod("Experiments") ---@module Experiments
 local FailedMarkers = shared.GBMod("FailedMarkers") ---@module FailedMarkers
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
+local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
 local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
 local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 
