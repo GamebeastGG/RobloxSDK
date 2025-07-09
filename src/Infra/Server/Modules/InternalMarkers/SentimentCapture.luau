@@ -5,7 +5,8 @@
 	SentimentCapture.luau
 	
 	Description:
-		No description provided.
+		Captures player chat messages and sends them as markers for sentiment analysis.
+		Messages are filtered for compliance before being sent.
 	
 --]]
 

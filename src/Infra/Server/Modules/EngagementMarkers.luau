@@ -5,7 +5,7 @@
 	EngagementMarkers.luau
 	
 	Description:
-		No description provided.
+		Handles processing and sending engagement markers to the Gamebeast backend.
 	
 --]]
 
@@ -25,17 +25,17 @@ local Cleaner = shared.GBMod("Cleaner")
 local MetaData = shared.GBMod("MetaData")
 local GetRemote = shared.GBMod("GetRemote")
 local Utilities = shared.GBMod("Utilities")
+local HostServer = shared.GBMod("HostServer") ---@module HostServer
 local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
+local FailedMarkers = shared.GBMod("FailedMarkers") ---@module FailedMarkers
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
+local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
 local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
 local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
-local Experiments = shared.GBMod("Experiments") ---@module Experiments
 
 --= Types =--
 
 --= Object References =--
-
-local FireMarkerEvent = GetRemote("Event", "FireMarker")
 
 --= Constants =--
 
@@ -43,14 +43,11 @@ local CLIENT_DATA_TIMEOUT = RunService:IsStudio() and 10 or 45
 local MAX_EVENT_QUEUE_SIZE = 1000
 local QUEUE_CHECK_TIME = 5
 local MAX_EVENT_REPORT_TIME = 10
-local SYSTEM_MARKERS = {
-	["Died"] = true,
-	["Logout"] = true,
-	["Login"] = true,
-	["Purchase"] = true,
-	["Chat"] = true,
-	--["GBClientPerformance"] = true,
-	--["GBServerPerformance"] = true,
+local ALLOWED_VALUE_TYPES = {
+	["string"] = true,
+	["number"] = true,
+	["boolean"] = true,
+	["table"] = true, -- Only dictionaries, not arrays
 }
 
 --= Variables =--
@@ -70,6 +67,7 @@ local ClientInfoWarned = false
 local function GetSessionIdForPlayer(player) : string?
 	if SessionIds[player] == nil and player.Parent then
 		SessionIds[player] = HttpService:GenerateGUID(false)
+		ServerClientInfoHandler:UpdateClientData(player, "sessionId", SessionIds[player])
 	end
 
 	return SessionIds[player]
@@ -85,25 +83,70 @@ local function EncodeVector3(vec)
 	return vectorArray
 end
 
+local function isMarkerDataValid(markerData : {}) : boolean
+	for _, value in markerData do
+		local valueType = type(value)
+		if ALLOWED_VALUE_TYPES[valueType] == nil then
+			return false
+		end
+
+		if valueType == "table" and not isMarkerDataValid(value) then
+			return false
+		end
+	end
+
+	return true
+end
+
+local function AddMarker(marker)
+	table.insert(MarkerQueue, marker)
+	
+	-- If marker queue size limit reached then send batch
+	if #MarkerQueue >= MAX_EVENT_QUEUE_SIZE then
+		EngagementMarkers:SendMarkers()
+	end
+end
+
 --= API Functions =--
 
 -- Send batch to GB
-function EngagementMarkers:SendMarkers()
-	if #MarkerQueue > 0 then
+function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : any}?)
+	local isCustomQueue = queue ~= nil
+	queue = queue or MarkerQueue
+	if #queue > 0 then
 		LastEventReportTime = tick()
 		
 		local data = {
-			markers = MarkerQueue
+			markers = queue
 		}
 
-		MarkerQueue = {}
-		GBRequests:GBRequest("v1/markers", data)
+		if not isCustomQueue then
+			MarkerQueue = {}
+		end
+		
+		local success, errorBody = GBRequests:GBRequestAsync("v1/markers", data)
+		if not success and isCustomQueue == false then
+			-- If request failed, add markers back to queue for retry
+			for _, marker in data.markers do
+				if not isMarkerDataValid(marker) then
+					Utilities.GBWarn("Invalid marker data detected, skipping marker")
+					continue
+				end
+
+				FailedMarkers:AddMarker(marker)
+			end
+
+			Utilities.GBWarn("Failed to send engagement markers to Gamebeast. Markers will be retried later.")
+		end
+		return success, errorBody
 	end
+
+	return true
 end
 
 -- Core function, should be used internally by SDK rather than fireMarker
 -- function EngagementMarkers:CreateMarker(source, markerType, player, position, value)
-function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", markerType : string, value : number | {[string] : any}, metaData : {[string] : any})
+function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", markerType : string, value : any | {[string] : any}, metaData : {[string] : any})
 	metaData = metaData or {}
 	-- Validate all arguments.
 	local usageStr
@@ -132,11 +175,19 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		return
 	end
 	
-	local valueType = typeof(value)
-
-	if value ~= nil and valueType ~= "table" and valueType ~= "number" or (valueType == "table" and #value > 0) then
-		Utilities.GBWarn("Value for ".. source .." marker \"".. markerType.."\" should be a key-value dictionary, number, or nil.\n".. usageStr)
+	local valueType = type(value)
+	if valueType == "table" and #value > 0 then -- Array check
+		Utilities.GBWarn("Value argument for ".. source .." marker \"".. markerType.."\" should not be an array. Use a dictionary instead.")
 		return
+	end
+
+	if value ~= nil and ALLOWED_VALUE_TYPES[valueType] == nil then
+		Utilities.GBWarn("Value argument for ".. source .." marker \"".. markerType.."\" be a primitive type or dictionary, got: ".. valueType)
+  		return
+	end
+
+	if value ~= nil and valueType ~= "table" then
+		value = { value = value } -- Wrap non-table values in a table
 	end
 	
 	-- Interface allows for player instance or userId. We already validated args types, so just handle accordingly.
@@ -150,7 +201,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		["timestamp"] = metaData.timestampOverride or DateTime.now().UnixTimestampMillis,
 		["type"] = markerType,
 		["userId"] = player and player.UserId, 
-		["sessionId"] = player and GetSessionIdForPlayer(player),
+		["sessionId"] = nil, -- Resolved later
 		["value"] = value,
 		["properties"] = {
 			["sdkPlatform"] = "roblox",
@@ -168,15 +219,6 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 				or Experiments.AssignedServerGroupId,
 		},
 	}
-
-	local function addMarker()
-		table.insert(MarkerQueue, entry)
-		
-		-- If marker queue size limit reached then send batch
-		if #MarkerQueue >= MAX_EVENT_QUEUE_SIZE then
-			EngagementMarkers:SendMarkers()
-		end
-	end
 
 	--[[
 		Ensure markers are sent with all required data.
@@ -197,7 +239,19 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			entry.properties.device = ServerClientInfoHandler:GetClientInfo(player, "device")
 			entry.properties.deviceSubType = ServerClientInfoHandler:GetClientInfo(player, "deviceSubType")
 			entry.properties.inputType = ServerClientInfoHandler:GetClientInfo(player, "inputType")
-			addMarker()
+
+			-- Attempt to resolve session ID from client info so we preserve it across game sessions.
+			local sessionId = ServerClientInfoHandler:GetClientInfo(player, "sessionId")
+			if sessionId and sessionId ~= "" then
+				entry.sessionId = sessionId
+				if player.Parent then
+					SessionIds[player] = sessionId
+				end
+			else
+				entry.sessionId = GetSessionIdForPlayer(player)
+			end
+
+			AddMarker(entry)
 
 			-- Remove from waiting list if it exists
 			if not shutdown then
@@ -286,16 +340,6 @@ end
 --= Initializers =--
 function EngagementMarkers:Init()
 	--NOTE: Firing markers from client is disabled. Shifting responsibility to the developer for security.
-	--[[ Handle client requests through API module
-	FireMarkerEvent.OnServerEvent:Connect(function(player, markerType, value, metaData)
-		if metaData then
-			metaData.player = player
-		else
-			metaData = {player = player}
-		end
-
-		EngagementMarkers:_createMarker("client", markerType, value, metaData)
-	end)]]
 
 	Players.ChildRemoved:Connect(function(player)
 		task.defer(function()
@@ -310,11 +354,66 @@ function EngagementMarkers:Init()
 			local lastReportElapsed = tick() - LastEventReportTime
 
 			if lastReportElapsed >= MAX_EVENT_REPORT_TIME then
-				EngagementMarkers:SendMarkers()
+				self:SendMarkers()
 			end
 			
 			if InternalConfigs:WaitForConfigsReady() then
 				MAX_EVENT_REPORT_TIME = InternalConfigs:GetActiveConfig("GBConfigs")["GBRates"]["EngagementMarkers"]
+			end
+		end
+	end)
+
+	task.spawn(function()
+		while task.wait(10) do
+			if not HostServer:IsHostServer() then
+				-- If not host, we don't need to send markers
+				continue
+			end
+
+			local processedCount = FailedMarkers:Get(1000, function(markers)
+				if #markers > 0 then
+					-- If we have markers to send, send them
+					local validMarkers = {}
+					local count = 0
+					for _, marker in markers do
+						if not isMarkerDataValid(marker) then
+							Utilities.GBWarn("Invalid marker data detected, skipping marker")
+							continue
+						end
+
+						table.insert(validMarkers, marker)
+						count += 1
+					end
+
+					local success, errorBody = self:SendMarkers(validMarkers)
+					if not success and errorBody and errorBody.rejectedMarkers then
+						if errorBody.ingestedMarkersCount then
+							return true -- Markers were sent, but were likely invalid for some reason.
+						end
+						
+						--[[ Logic to handle rejected markers if needed
+						local rejectedMarkerIds = {}
+						for _, rejectedMarkerInfo in errorBody.rejectedMarkers do
+							rejectedMarkerIds[rejectedMarkerInfo.marker.markerId] = true
+						end
+
+						for mIndex=1, count do
+							local markerId = validMarkers[mIndex].markerId
+							if rejectedMarkerIds[markerId] then
+								-- Do something with the rejected marker?
+							else
+								print("Successfully sent marker:", markerId)
+							end
+						end
+						]]
+					end
+
+					return success
+				end
+			end)
+
+			if processedCount <= 0 then
+				task.wait(55) -- Wait longer if no markers to process
 			end
 		end
 	end)
@@ -324,7 +423,9 @@ function EngagementMarkers:Init()
 			data.resolved(true)
 		end
 
-		EngagementMarkers:SendMarkers()
+		self:SendMarkers()
+
+		FailedMarkers:ForceSavePending()
 	end)
 end
 

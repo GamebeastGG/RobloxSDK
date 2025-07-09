@@ -5,7 +5,7 @@ local Players = game:GetService("Players")
 local ChatService = game:GetService("Chat")
 local Updater = shared.GBMod("Updater")
 local Utilities = shared.GBMod("Utilities")
-local Experiments = shared.GBMod("Experiments")
+local Experiments = shared.GBMod("InternalExperiments")
 
 -- Header comments provide info on request details sent from backend.
 
