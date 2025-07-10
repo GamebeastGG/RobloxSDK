@@ -45,7 +45,7 @@ function getVersion(fileText) {
   console.log('Payload size (bytes):', Buffer.byteLength(output));
 
   try {
-    const result = await redis.set("latestSdkSourceCode", output);
+    const result = await redis.set("latestSdkSourceCodeV2", output);
     console.log('Redis SET result:', result);
 
     const versionSetResult = await redis.set("latestSdkVersionV2", version);
