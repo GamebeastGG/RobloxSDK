@@ -42,6 +42,7 @@ local OtherHostFound = false
 local LastHeartbeatTick = tick()
 local ServersSinceStartup = 0
 local LastHeartbeatSent = os.time()
+local ServerId = Utilities.getServerId()
 
 --= Public Variables =--
 
@@ -55,7 +56,7 @@ end
 
 local function SendHeartbeat()
 	LastHeartbeatSent = os.time()
-	Utilities.publishMessage(HOST_HEARTBEAT_TOPIC, {Source = game.JobId})
+	Utilities.publishMessage(HOST_HEARTBEAT_TOPIC, {Source = ServerId})
 end
 
 --= API Functions =--
@@ -96,12 +97,12 @@ function HostServer:Init()
 	-- If ping is received on this channel and it is not from ourself, then another host server exists and we relinquish role
 	local success, reason = pcall(function()
 		MessagingService:SubscribeAsync(HOST_HEARTBEAT_TOPIC, function(message : {Sent : number, Data : {Source : string}})
-			if message.Data.Source == game.JobId then return end
+			if message.Data.Source == ServerId then return end
 
 			LastHeartbeatTick = tick()
 			--print("New host server found: ".. message.Data)
 			OtherHostFound = true
-			if message.Data.Source > game.JobId then -- If other server should be host
+			if message.Data.Source > ServerId then -- If other server should be host
 				self:RelinquishHostServerRole()
 			end
 		end)

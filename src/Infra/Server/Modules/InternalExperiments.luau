@@ -237,9 +237,7 @@ end
 	specific players and servers.
 ]]
 function Experiments:ProcessExperimentReassignmentRequest(request: ExperimentReassignmentPropagationRequest)
-	local currentGameserverId = if game.JobId == ""
-		then "00000000-0000-0000-0000-000000000000"
-		else game.JobId
+	local currentGameserverId = Utilities.getServerId()
 
 	-- If this gameserver is included in the request, queue reassignment
 	if table.find(request.gameserverIds, currentGameserverId) then

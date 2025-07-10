@@ -3,6 +3,8 @@
 
 local marketplaceService = game:GetService("MarketplaceService")
 local messagingService = game:GetService("MessagingService")
+local httpService = game:GetService("HttpService")
+local runService = game:GetService("RunService")
 
 local DataCache = shared.GBMod("DataCache")
 
@@ -195,6 +197,15 @@ function utilities.getValueAtPath(root: any, path: {string}): any
 		value = value[pathSegment]
 	end
 	return value
+end
+
+local serverId = if runService:IsStudio()
+	then `studio:{httpService:GenerateGUID(false):lower()}`
+	else game.JobId
+
+--- Returns the server's ID in live games, or a generated one for each Studio test session (prefixed with `studio:`).
+function utilities.getServerId(): string
+	return serverId
 end
 
 -- Wrapper for player added that ensures players that joined before the signal was attached get passed through the callback.

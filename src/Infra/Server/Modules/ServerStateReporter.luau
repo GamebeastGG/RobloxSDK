@@ -23,6 +23,7 @@ local Stats = game:GetService("Stats")
 local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
 local MetricCollector = shared.GBMod("MetricCollector") ---@module MetricCollector
 local GetRemote = shared.GBMod("GetRemote") ---@module GetRemote
+local Utilities = shared.GBMod("Utilities") ---@module Utilities
 
 --= Types =--
 type ClientMetricReport = {
@@ -79,7 +80,7 @@ end
 -- Send server state report to GB
 function ServerStateReporter:SendServerStateReport()
     local serverStateReport = self:PrepareServerStateReport()
-    local serverId = if RunService:IsStudio() then HttpService:GenerateGUID(false) else game.JobId
+    local serverId = Utilities.getServerId()
 
     GBRequests:GBRequest(`v1/servers/roblox/{serverId}`, serverStateReport)
 end

@@ -135,14 +135,8 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 		["isstudio"] = tostring(isStudio),
 		["sdkversion"] = MetaData.version,
 		["universeid"] = tostring(game.GameId),
+		["serverid"] = Utilities.getServerId(),
 	}
-
-	-- JobId is undefined in studio so send a hard coded default for this environment
-	if isStudio then
-		headers["serverid"] = "00000000-0000-0000-0000-000000000000"
-	else
-		headers["serverid"] = game.JobId
-	end
 
 	local url = GBDomain.. "/".. requestRoute
 
