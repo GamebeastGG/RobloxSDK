@@ -10,6 +10,7 @@ redis.on('error', (err) => {
   process.exit(1);
 });
 
+
 function parseDirectory(dirPath) {
   const result = {};
 
@@ -31,11 +32,16 @@ function parseDirectory(dirPath) {
   return result;
 }
 
+function getVersion(fileText) {
+  const versionMatch = fileText.match(/version\s*=\s*['"]([^'"]+)['"]/);
+  return versionMatch ? versionMatch[1] : 'unknown';
+}
+
 (async () => {
   const rootDir = process.cwd() + "/src";
   const parsed = parseDirectory(rootDir);
 
-  const output = JSON.stringify({ worked: true, source: parsed });
+  const output = JSON.stringify({ worked: true, version: getVersion(parsed.Infra["MetaData.lua"]), source: parsed });
   console.log('Payload size (bytes):', Buffer.byteLength(output));
 
   try {
