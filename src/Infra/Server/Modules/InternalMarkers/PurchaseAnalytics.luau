@@ -74,7 +74,7 @@ local function FlushProductPurchaseCache(player : Player)
 
 	for _, data in ipairs(playerCache) do
 		task.spawn(function()
-			PurchaseAnalytics:UpdatePlayerSpend(player, data.itemId, Enum.InfoType.Product, {position = data.position, timestampOverride = data.timestamp})
+			PurchaseAnalytics:UpdatePlayerSpend(player, false, data.itemId, Enum.InfoType.Product, {position = data.position, timestampOverride = data.timestamp})
 		end)
 	end
 
@@ -83,7 +83,7 @@ end
 
 --= API Functions =--
 
-function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, itemId : number, itemType : Enum.InfoType, metadataOverride : {[string] : any}?)
+function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, fromReceipt : boolean, itemId : number, itemType : Enum.InfoType, metadataOverride : {[string] : any}?)
 	local player = Utilities.resolvePlayerObject(player)
 
 	local itemInfo = GetProductInfo(itemId, itemType)
@@ -109,6 +109,7 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, itemId : 
 
 	-- Don't send redundant information over the wire
 	local args = {
+		["fromReceipt"] = fromReceipt,
 		["type"] = ENUM_TO_TYPE[itemType] or "unknown",
 		["id"] = itemId,
 		["price"] = clientPrice or itemInfo.PriceInRobux,
@@ -151,7 +152,7 @@ function PurchaseAnalytics:DevProductPurchased(fromReceipt : boolean, playerId :
 	if fromReceipt then
 		UsingProductReceipts = true
 		DevProductEventCache[player] = nil
-		self:UpdatePlayerSpend(playerId, itemId, Enum.InfoType.Product, {position = position})
+		self:UpdatePlayerSpend(playerId, true, itemId, Enum.InfoType.Product, {position = position})
 	else
 		DevProductEventCache[player] = DevProductEventCache[player] or {}
 		local playerCache = DevProductEventCache[player]
@@ -173,14 +174,14 @@ function PurchaseAnalytics:Init()
 	-- Purchase records handler for gamepasses
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamePassId, wasPurchased)
 		if wasPurchased then
-			self:UpdatePlayerSpend(player, gamePassId, Enum.InfoType.GamePass)
+			self:UpdatePlayerSpend(player, false, gamePassId, Enum.InfoType.GamePass)
 		end
 	end)
 
 	-- Purchase records handler for assets / other
 	MarketplaceService.PromptPurchaseFinished:Connect(function(player, assetId, wasPurchased)
 		if wasPurchased then
-			self:UpdatePlayerSpend(player, assetId, Enum.InfoType.Asset)
+			self:UpdatePlayerSpend(player, false, assetId, Enum.InfoType.Asset)
 		end
 	end)
 
@@ -192,7 +193,7 @@ function PurchaseAnalytics:Init()
 			end)
 
 			if success and subscriptionStatus.IsSubscribed then
-				self:UpdatePlayerSpend(player, subscriptionId, Enum.InfoType.Subscription)
+				self:UpdatePlayerSpend(player, false, subscriptionId, Enum.InfoType.Subscription)
 			end
 		end
 	end)
