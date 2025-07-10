@@ -40,13 +40,17 @@ function getVersion(fileText) {
 (async () => {
   const rootDir = process.cwd() + "/src";
   const parsed = parseDirectory(rootDir);
-
-  const output = JSON.stringify({ worked: true, version: getVersion(parsed.Infra["MetaData.lua"]), source: parsed });
+  const version = getVersion(parsed.Infra["MetaData.lua"]);
+  const output = JSON.stringify({ worked: true, version: version, source: parsed });
   console.log('Payload size (bytes):', Buffer.byteLength(output));
 
   try {
     const result = await redis.set("latestSdkSourceCode", output);
     console.log('Redis SET result:', result);
+
+    const versionSetResult = await redis.set("latestSdkVersionV2", version);
+    console.log("Redis version SET result:", versionSetResult);
+
     process.exit(0);
   } catch (err) {
     console.error('Redis SET failed:', err);
