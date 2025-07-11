@@ -5,7 +5,7 @@
     Configs.lua
     
     Description:
-        No description provided.
+        Public API module for accessing client-specific configuration data.
     
 --]]
 
@@ -17,7 +17,6 @@ local Configs = { }
 --= Dependencies =--
 
 local ClientConfigs = shared.GBMod("ClientConfigs") ---@module ClientConfigs
-local Signal = shared.GBMod("Signal") ---@module Signal
 
 --= Types =--
 
@@ -33,7 +32,7 @@ local Signal = shared.GBMod("Signal") ---@module Signal
 
 --= API Functions =--
 
-function Configs:Get(path : string | { string })
+function Configs:Get(path : string | { string }) : any
     return ClientConfigs:Get(path)
 end
 
@@ -55,12 +54,26 @@ function Configs:OnChanged(targetConfig : string | {string}, callback : (newValu
     return ClientConfigs:OnChanged(targetConfig, callback)
 end
 
-function Configs:OnReady(callback : (configs : any) -> ()) : RBXScriptSignal
+function Configs:OnReady(callback : (configs : any) -> ()) : RBXScriptConnection
     return ClientConfigs:OnReady(callback)
 end
 
 function Configs:IsReady() : boolean
     return ClientConfigs:IsReady()
+end
+
+-- Added for type consistency, but these methods are server-only.
+
+function Configs:GetForPlayer(player: Player, path: string | {string}) : any
+    error("Configs:GetForPlayer is a server-only method. Use :Get instead.")
+end
+
+function Configs:ObserveForPlayer(player: Player, targetConfig: string | {string}, callback: (newValue: any, oldValue: any) -> ()): RBXScriptConnection
+    error("Configs:ObserveForPlayer is a server-only method. Use :Observe instead.")
+end
+
+function Configs:OnChangedForPlayer(player: Player, targetConfig: string | {string}, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
+    error("Configs:OnChangedForPlayer is a server-only method. Use :OnChanged instead.")
 end
 
 --= Return Module =--

@@ -10,6 +10,7 @@ local Signal = shared.GBMod("Signal")
 local Utilities = shared.GBMod("Utilities")
 local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
 local Cleaner = shared.GBMod("Cleaner") ---@module Cleaner
+local Types = require(script.Parent.Parent.Parent.Types)
 
 -- Types
 type ConfigSnapshot = {
@@ -22,6 +23,8 @@ type ConfigSnapshot = {
 }
 type AvailableExperimentGroupSnapshot = {
 	id: number,
+	groupName: string,
+	experimentName: string,
 	endsAt: number?,
 	configs: ConfigSnapshot,
 }
@@ -234,9 +237,7 @@ end
 	specific players and servers.
 ]]
 function Experiments:ProcessExperimentReassignmentRequest(request: ExperimentReassignmentPropagationRequest)
-	local currentGameserverId = if game.JobId == ""
-		then "00000000-0000-0000-0000-000000000000"
-		else game.JobId
+	local currentGameserverId = Utilities.getServerId()
 
 	-- If this gameserver is included in the request, queue reassignment
 	if table.find(request.gameserverIds, currentGameserverId) then
@@ -261,7 +262,7 @@ end
 
 	Returns a function to cancel listening.
 ]]
-function Experiments:ListenForPlayerAssignment(player: Player, callback: (groupId: number?) -> ()): RBXScriptSignal
+function Experiments:ListenForPlayerAssignment(player: Player, callback: (groupId: number?) -> ()): RBXScriptConnection
 	local listenerCleaner = Cleaner.new()
 	local connection = SignalConnection.new(function()
 		listenerCleaner:Destroy()
@@ -313,6 +314,26 @@ function Experiments:ListenForPlayerAssignment(player: Player, callback: (groupI
 	end))
 
 	return connection
+end
+
+--[[
+	Returns metadata about the specified experiment group, if it has been
+	fetched from the backend, and is active.
+]]
+function Experiments:GetActiveGroupMetadata(groupId: number): Types.ExperimentGroupMetadata?
+	if not currentAssignmentState then
+		return nil
+	end
+
+	local groupState = currentAssignmentState.activeGroupStateById[groupId]
+	if not groupState then
+		return nil
+	end
+
+	return {
+		experimentName = groupState.group.experimentName,
+		groupName = groupState.group.groupName,
+	}
 end
 
 --[[

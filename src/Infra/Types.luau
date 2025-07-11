@@ -5,6 +5,8 @@ type SDKSettings = {
 	includeWarningStackTrace : boolean,
 	-- Enables SDK debug messages for internal state changes, etc.
 	sdkDebugEnabled : boolean,
+	-- Custom URL for the SDK, if any.
+	customUrl : string | nil,
 }
 export type ServerSetupConfig = {
 	key : string | Secret,
@@ -25,8 +27,11 @@ export type ConfigsService = {
 	Get : (self : ConfigsService, path : string | { string }) -> any,
 	Observe : (self : ConfigsService, targetConfig : string | { string }, callback : (newValue : any, oldValue : any) -> ()) -> RBXScriptConnection,
 	OnChanged : (self : ConfigsService, targetConfig : string | {string}, callback : (newValue : any, oldValue : any) -> ()) -> RBXScriptConnection,
-	OnReady : (self : ConfigsService, callback : (configs : any) -> ()) -> RBXScriptSignal,
+	OnReady : (self : ConfigsService, callback : (configs : any) -> ()) -> RBXScriptConnection,
 	IsReady : (self : ConfigsService) -> boolean,
+	GetForPlayer : (self : ConfigsService, player : Player, path : string | { string }) -> any,
+	ObserveForPlayer : (self : ConfigsService, player : Player, targetConfig : string | { string }, callback : (newValue : any, oldValue : any) -> ()) -> RBXScriptConnection,
+	OnChangedForPlayer : (self : ConfigsService, player : Player, targetConfig : string | {string}, callback : (newValue : any, oldValue : any) -> ()) -> RBXScriptConnection,
 }
 
 export type MarkersService = {
@@ -45,7 +50,14 @@ export type EventsService = {
 	OnEnd : (self : EventsService, event : string, callback : (data : JSON) -> ()) -> RBXScriptConnection,
 }
 
+export type ExperimentsService = {
+	GetGroupForPlayer: (self: ExperimentsService, player: Player) -> ExperimentGroupMetadata?,
+}
+export type ExperimentGroupMetadata = {
+	experimentName: string,
+	groupName: string,
+}
 
-export type Service = ConfigsService | MarkersService | EventsService
+export type Service = ConfigsService | MarkersService | EventsService | JobsService | ExperimentsService
 
 return true

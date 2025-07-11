@@ -31,15 +31,13 @@ local MetaData = shared.GBMod("MetaData") ---@module MetaData
 local URL_SUFFIX = "/sdk"
 local ENDPOINTS = {
 	{ 
-		URL = "https://api.gamebeast.gg" .. URL_SUFFIX, -- http://localhost:3001 -- https://api.gamebeast.gg -- https://api.stage.gamebeast.gg
+		URL = "https://api.gamebeast.gg", -- http://localhost:3001 -- https://api.gamebeast.gg -- https://api.stage.gamebeast.gg
 		Requests = { -- NOTE: If you require URL parameters, use {param} in the route string. Example: "v1/servers/roblox/{serverId}"
 			["v1/markers"] = "POST",
 			["v1/requests"] = "GET",
 			["v1/requests/completed"] = "POST",
 			["v1/requests/started"] = "PUT",
 			["v1/configurations"] = "GET",
-			["v1/heatmap"] = "POST",
-			["v1/heatmap/waypoint"] = "POST",
 			["v1/latest/version?platform=roblox"] = "GET",
 			["v1/experiments/assignments"] = "POST",
 			["v1/servers/roblox/{serverId}"] = "POST"
@@ -70,7 +68,7 @@ local function GetEndpointForRequest(requestRoute : string) : (string?, string?)
 			end
 		end
 
-		return endpoint.URL, current["__method"]
+		return ((DataCache:Get("Settings").customUrl or endpoint.URL)..URL_SUFFIX), current["__method"]
 	end
 end
 
@@ -116,8 +114,15 @@ end
 
 --YEILDS 
 function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any}, maxRetries : number?) : (boolean, any?)
-	RequestProcessingCount += 1
 	local GBDomain, requestMethod = GetEndpointForRequest(requestRoute)
+	
+	if not GBDomain or not requestMethod then
+		Utilities.GBWarn("Invalid request route:", requestRoute)
+		return false, nil
+	end
+
+	RequestProcessingCount += 1
+
 	local requestBody
 	args = args or {}
 
@@ -130,14 +135,8 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 		["isstudio"] = tostring(isStudio),
 		["sdkversion"] = MetaData.version,
 		["universeid"] = tostring(game.GameId),
+		["serverid"] = Utilities.getServerId(),
 	}
-
-	-- JobId is undefined in studio so send a hard coded default for this environment
-	if isStudio then
-		headers["serverid"] = "00000000-0000-0000-0000-000000000000"
-	else
-		headers["serverid"] = game.JobId
-	end
 
 	local url = GBDomain.. "/".. requestRoute
 

@@ -5,7 +5,7 @@
     Cleaner.lua
     
     Description:
-        No description provided.
+        A utility module for managing and cleaning up objects and connections.
     
 --]]
 

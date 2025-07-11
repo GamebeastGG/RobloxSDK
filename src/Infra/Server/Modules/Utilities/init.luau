@@ -3,6 +3,8 @@
 
 local marketplaceService = game:GetService("MarketplaceService")
 local messagingService = game:GetService("MessagingService")
+local httpService = game:GetService("HttpService")
+local runService = game:GetService("RunService")
 
 local DataCache = shared.GBMod("DataCache")
 
@@ -11,15 +13,12 @@ local MessagingServiceDebugCache = {} :: {[string] : number}
 local utilities = {}
 
 -- Central function for warning messages across SDK. Indicates Gamebeast as warning source and allows for output settings.
-utilities.GBWarn = function(message)
+utilities.GBWarn = function(...)
 	if DataCache:Get("Settings").sdkWarningsEnabled then
+		warn("GamebeastSDK:", ...)
 		if DataCache:Get("Settings").includeWarningStackTrace then
-			message = debug.traceback("GamebeastSDK: ".. message)
-		else
-			message = "GamebeastSDK: ".. message
+			warn("GamebeastSDK Traceback:", debug.traceback())
 		end
-		
-		warn(message)
 	end
 end
 
@@ -198,6 +197,15 @@ function utilities.getValueAtPath(root: any, path: {string}): any
 		value = value[pathSegment]
 	end
 	return value
+end
+
+local serverId = if runService:IsStudio()
+	then `studio:{httpService:GenerateGUID(false):lower()}`
+	else game.JobId
+
+--- Returns the server's ID in live games, or a generated one for each Studio test session (prefixed with `studio:`).
+function utilities.getServerId(): string
+	return serverId
 end
 
 -- Wrapper for player added that ensures players that joined before the signal was attached get passed through the callback.
