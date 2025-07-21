@@ -41,14 +41,13 @@ jobs:
 
       - name: Set up SSH SOCKS proxy
         env:
-          REDIS_HOST: "${{ github.event.inputs.target == 'stage' && '10.128.0.62' || github.event.inputs.target == 'prod' && '10.128.15.192' || '10.128.0.114' }}"
           PROXY_CLUSTER: "${{ github.event.inputs.target == 'stage' && 'proxy-stage-cluster' || github.event.inputs.target == 'prod' && 'proxy-prod-cluster' || 'proxy-dev-cluster' }}"
         run: |
           gcloud beta compute ssh $PROXY_CLUSTER \
             --project x-cycling-414419 \
             --zone us-central1-a \
             --tunnel-through-iap \
-            --ssh-flag="-4 -L 6379:$REDIS_HOST:6379 -N -q -f"
+            --ssh-flag="-4 -L 3000:127.0.0.1:3000 -N -q -f"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -58,5 +57,5 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Update Redis
-        run: npm install ioredis && node .github/workflows/createSdkSource.js
+      - name: Update deployment
+        run: node .github/workflows/createSdkSource.js

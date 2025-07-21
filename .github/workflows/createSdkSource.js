@@ -1,8 +1,5 @@
-const Redis = require('ioredis');
 const fs = require('fs');
 const path = require('path');
-
-const redis = new Redis();
 
 redis.on('connect', () => console.log('Redis connected'));
 redis.on('error', (err) => {
@@ -45,15 +42,18 @@ function getVersion(fileText) {
   console.log('Payload size (bytes):', Buffer.byteLength(output));
 
   try {
-    const result = await redis.set("latestSdkSourceCodeV2", output);
-    console.log('Redis SET result:', result);
-
-    const versionSetResult = await redis.set("latestSdkVersionV2", version);
-    console.log("Redis version SET result:", versionSetResult);
+    await fetch({
+      url: "http://127.0.0.1:3000/update-sdk-deployment",
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: output,
+    });
 
     process.exit(0);
   } catch (err) {
-    console.error('Redis SET failed:', err);
+    console.error("Deployment failed:", err);
     process.exit(1);
   }
 })();
