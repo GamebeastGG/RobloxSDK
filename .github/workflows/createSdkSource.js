@@ -1,13 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 
-redis.on('connect', () => console.log('Redis connected'));
-redis.on('error', (err) => {
-  console.error('Redis error:', err);
-  process.exit(1);
-});
-
-
 function parseDirectory(dirPath) {
   const result = {};
 
@@ -42,8 +35,7 @@ function getVersion(fileText) {
   console.log('Payload size (bytes):', Buffer.byteLength(output));
 
   try {
-    await fetch({
-      url: "http://127.0.0.1:3000/update-sdk-deployment",
+    await fetch("http://127.0.0.1:3000/update-sdk-deployment", {
       method: "POST",
       headers: {
         "content-type": "application/json"
