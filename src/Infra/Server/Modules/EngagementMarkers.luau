@@ -224,14 +224,19 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		Ensure markers are sent with all required data.
 	]]
 
-	local pendingMarkerData = {
-		pendingCleaner = Cleaner.new(),
-		tasks = {},
-		activeTasks = 0,
-		resolved = nil,
-	}
-
 	InternalConfigs:OnReady(function()
+		if not player then -- Server marker
+			AddMarker(entry)
+			return
+		end
+
+		local pendingMarkerData = {
+			pendingCleaner = Cleaner.new(),
+			tasks = {},
+			activeTasks = 0,
+			resolved = nil,
+		}
+
 		local function resolved(shutdown : boolean?)
 			pendingMarkerData.pendingCleaner:Clean()
 
