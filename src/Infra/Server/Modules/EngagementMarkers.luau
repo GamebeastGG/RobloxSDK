@@ -49,6 +49,10 @@ local ALLOWED_VALUE_TYPES = {
 	["boolean"] = true,
 	["table"] = true, -- Only dictionaries, not arrays
 }
+local DROP_MARKER_CODES = {
+	["INVALID_MARKERS"] = true,
+	["SUBSCRIPTION_LIMIT_EXCEEDED"] = true
+}
 
 --= Variables =--
 
@@ -126,14 +130,23 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 		
 		local success, errorBody = GBRequests:GBRequestAsync("v1/markers", data)
 		if not success and isCustomQueue == false then
+			if errorBody and errorBody.errorCode and DROP_MARKER_CODES[errorBody.errorCode] then
+				return false, errorBody -- Drop the markers if they were all rejected.
+			end
+			
 			-- If request failed, add markers back to queue for retry
+			local invalidMarkerCount = 0
 			for _, marker in data.markers do
 				if not isMarkerDataValid(marker) then
-					Utilities.GBWarn("Invalid marker data detected, skipping marker")
+					invalidMarkerCount += 1
 					continue
 				end
-
+				
 				FailedMarkers:AddMarker(marker)
+			end
+
+			if invalidMarkerCount > 0 then
+				Utilities.GBWarn(`{invalidMarkerCount} of the {#data.markers} sent are invalid and will not be retried.`)
 			end
 
 			Utilities.GBWarn("Failed to send engagement markers to Gamebeast. Markers will be retried later.")
@@ -390,31 +403,10 @@ function EngagementMarkers:Init()
 						count += 1
 					end
 
-					local success, errorBody = self:SendMarkers(validMarkers)
-					if not success and errorBody and errorBody.rejectedMarkers then
-						if errorBody.ingestedMarkersCount then
-							return true -- Markers were sent, but were likely invalid for some reason.
-						end
-						
-						--[[ Logic to handle rejected markers if needed
-						local rejectedMarkerIds = {}
-						for _, rejectedMarkerInfo in errorBody.rejectedMarkers do
-							rejectedMarkerIds[rejectedMarkerInfo.marker.markerId] = true
-						end
-
-						for mIndex=1, count do
-							local markerId = validMarkers[mIndex].markerId
-							if rejectedMarkerIds[markerId] then
-								-- Do something with the rejected marker?
-							else
-								print("Successfully sent marker:", markerId)
-							end
-						end
-						]]
-					end
-
-					return success
+					self:SendMarkers(validMarkers)
 				end
+
+				-- NOTE: If send fails, it automatically re-inserts markers into the backup
 			end)
 
 			if processedCount <= 0 then
