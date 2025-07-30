@@ -43,7 +43,6 @@ local RetryQueue = {} :: {{retryCount : number, markers : {any}}}
 local MarkersPendingBatch = {} :: {any}
 local MarkersPendingCount = 0
 
-
 --= Public Variables =--
 
 --= Internal Functions =--
@@ -56,7 +55,7 @@ function FailedMarkers:CanAfford() : boolean
     local getSortedBudget = DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetSortedAsync)
 
     -- Check if we have enough budget for both requests
-    return getSortedBudget > 1 and budget >= 20 and sortedBudget >= 12
+    return getSortedBudget > 1 and budget >= 30 and sortedBudget >= 12
 end
 
 -- Uses Budget of 1 Ordered and 1 Normal
@@ -99,7 +98,7 @@ function FailedMarkers:Save(markers : {any}, isRetry : boolean?) : boolean
 end
 
 -- Uses max budget of 1 GetSorted, 20 SetIncrementAsync, and 10 SetIncrementSortedAsync
-function FailedMarkers:Get(maxMarkers : number, callback : (({any}) -> boolean)?) : number
+function FailedMarkers:Get(maxMarkers : number, callback : (({any}) -> ())) : number
     if not self:CanAfford() then
         return {}
     end
@@ -123,45 +122,45 @@ function FailedMarkers:Get(maxMarkers : number, callback : (({any}) -> boolean)?
             break
         end
 
+        local fetchedMarkers = {}
+        local success, err = pcall(function()
+            MarkersDataStore:UpdateAsync(kvPair.key, function(current)
+                if not current then
+                    return nil -- If the key doesn't exist cancel the operation
+                end
 
-        local success, data = pcall(function()
-            return MarkersDataStore:GetAsync(kvPair.key)
+                fetchedMarkers = current
+
+                return {} -- Return empty table so if deletion fails, we don't keep the markers that were processed.
+            end)
         end)
-
-        if data == nil then
-            -- If the data is nil, it means the key was deleted or doesn't exist
-            continue
-        end
-
     
-        table.insert(toDelete, kvPair.key)
-
-        if success and data then
-            for _, marker in pairs(data) do
+        if success then
+            for _, marker in pairs(fetchedMarkers) do
                 table.insert(markers, marker)
             end
 
             count += kvPair.value
+            table.insert(toDelete, kvPair.key)
         else
-            Utilities.GBWarn("Failed to retrieve markers for key:", kvPair.key, "Error:", data)
+            Utilities.GBWarn("Failed to retrieve markers for key:", kvPair.key, "Error:", err)
         end
     end
 
+    task.spawn(function()
+        callback(markers)
+    end)
 
-    local success = callback(markers)
-    if success then
-        for _, key in toDelete do
-            local deleteSuccess, deleteError = pcall(function()
-                OrderedMarkersDataStore:RemoveAsync(key)
-                MarkersDataStore:RemoveAsync(key)
-            end)
+    for _, key in toDelete do
+        local deleteSuccess, deleteError = pcall(function()
+            MarkersDataStore:RemoveAsync(key)
+            OrderedMarkersDataStore:RemoveAsync(key)
+        end)
 
-            if not deleteSuccess then
-                Utilities.GBWarn("Failed to delete key from OrderedMarkersDataStore:", key, "Error:", deleteError)
-            end
+        if not deleteSuccess then
+            Utilities.GBWarn("Failed to delete key from OrderedMarkersDataStore:", key, "Error:", deleteError)
         end
     end
-
 
     return count
 end

@@ -178,10 +178,10 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 			return HttpService:JSONDecode(response.Body)
 		end)
 
-		if success == false and bodyParsed and bodyParsed.message then
-			Utilities.GBWarn("Request failed: ".. bodyParsed.message)
+		if success == false then
+			Utilities.GBWarn("Request failed ("..response.StatusCode.. ") | "..(bodyParsed and bodyParsed.message or "Unknown error"))
 		end
-
+		
 		return success, bodyParsed
 	end
 
