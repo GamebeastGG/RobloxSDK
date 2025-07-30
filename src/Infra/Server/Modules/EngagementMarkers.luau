@@ -129,7 +129,7 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 		end
 		
 		local success, errorBody = GBRequests:GBRequestAsync("v1/markers", data)
-		if not success and isCustomQueue == false then
+		if not success then
 			if errorBody and errorBody.errorCode and DROP_MARKER_CODES[errorBody.errorCode] then
 				return false, errorBody -- Drop the markers if they were all rejected.
 			end
