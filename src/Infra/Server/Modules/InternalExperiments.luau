@@ -156,9 +156,12 @@ function Experiments:UpdateStateFromAvailableExperiments(
 
 		-- Cache received experiment group configs
 		local snapshotGroupIdSet = {} :: {[number]: true}
+		local didReceiveNewGroup = false
 		for _, group in availableGroups do
 			snapshotGroupIdSet[group.id] = true
-			initializeActiveGroupState(group)
+			if initializeActiveGroupState(group) then
+				didReceiveNewGroup = true
+			end
 			clearUnfetchedActiveGroupState(group.id)
 		end
 
@@ -193,6 +196,11 @@ function Experiments:UpdateStateFromAvailableExperiments(
 					clearActiveGroupState(groupId, true)
 				end
 			end
+
+			-- If new groups are available, queue assignment for non-assigned players
+			if didReceiveNewGroup then
+				queueAssignmentForNonAssignedPlayers()
+			end
 		end
 	end
 
@@ -216,6 +224,7 @@ function Experiments:UpdateStateFromAvailableExperiments(
 				enableAssignment()
 			else
 				Utilities.GBLog("Future experiment group", groupId, "started, assignment already enabled")
+				queueAssignmentForNonAssignedPlayers()
 			end
 			if currentAssignmentState then
 				initializeUnfetchedActiveGroupState(groupId, endTimeMs)
@@ -507,6 +516,7 @@ function executeAssignmentRequest()
 		end
 
 	elseif (assignmentResponse.targetType == "player") and assignmentResponse.playerIdsByGroupId then
+		local assignedPlayerIdSet: {[number]: true} = {}
 		for groupIdString, groupPlayerIds in assignmentResponse.playerIdsByGroupId do
 			local groupId = tonumber(groupIdString) :: number
 			for _, playerIdString in groupPlayerIds do
@@ -514,6 +524,19 @@ function executeAssignmentRequest()
 				local player = playerId and Players:GetPlayerByUserId(playerId)
 				if player then
 					setAssignedPlayerGroupId(player, groupId)
+				end
+				if playerId then
+					assignedPlayerIdSet[playerId] = true
+				end
+			end
+		end
+
+		-- Clear assignment for players who were not reassigned to a new group
+		for _, playerId in playerIds do
+			if not assignedPlayerIdSet[playerId] then
+				local player = Players:GetPlayerByUserId(playerId)
+				if player then
+					setAssignedPlayerGroupId(player, nil)
 				end
 			end
 		end
@@ -670,13 +693,15 @@ end
 
 	This sets up tracking for when the group should become inactive
 	and be cleaned up.
+
+	Returns whether this was a new group, or if it was already initialized.
 ]]
-function initializeActiveGroupState(groupSnapshot: AvailableExperimentGroupSnapshot)
+function initializeActiveGroupState(groupSnapshot: AvailableExperimentGroupSnapshot): boolean
 	assert(currentAssignmentState, "Assignment has not been started")
 
 	-- Only initialize group state once
 	if currentAssignmentState.activeGroupStateById[groupSnapshot.id] then
-		return
+		return false
 	end
 
 	-- Initialize group state
@@ -702,6 +727,8 @@ function initializeActiveGroupState(groupSnapshot: AvailableExperimentGroupSnaps
 			end
 		end)
 	end
+
+	return true
 end
 
 --[[
@@ -805,6 +832,32 @@ function clearUnfetchedActiveGroupState(groupId: number)
 	currentAssignmentState.unfetchedActiveGroupStateById[groupId] = nil
 
 	Utilities.GBLog("Cleared unfetched active experiment group state:", groupId)
+end
+
+--[[
+	Identifies players who are not assigned to any experiment group (i.e. they weren't
+	eligible for any available experiments at assignment time), and queues them for
+	assignment.
+
+	This is called when new experiment groups become available (e.g. when new snapshots
+	include a new group, or when a scheduled group begins)
+]]
+function queueAssignmentForNonAssignedPlayers()
+	if not currentAssignmentState then
+		return
+	end
+
+	local nonAssignedPlayers: {Player} = {}
+	for _, player in Players:GetPlayers() do
+		if not Experiments.AssignedGroupIdByPlayer[player] then
+			table.insert(nonAssignedPlayers, player)
+		end
+	end
+
+	if #nonAssignedPlayers > 0 then
+		Utilities.GBLog("New experiment groups available, queueing assignment for non-assigned players", nonAssignedPlayers)
+		queueAssignment(nonAssignedPlayers)
+	end
 end
 
 return Experiments
