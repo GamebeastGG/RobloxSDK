@@ -124,21 +124,21 @@ requestFunctions.funcs = {
 	-- host_only: false
 	-- async: false
 	["UpdateConfigs"] = function(args)
-		Utilities.GBLog("Received config update request")
+		Utilities.GBLog("Received config update request", args)
 		Updater:UpdateConfigs(args)
 	end;
 
 	-- host_only: false
 	-- async: false
 	["PropagateAvailableExperiments"] = function (args)
-		Utilities.GBLog("Received experiment update request")
+		Utilities.GBLog("Received experiment update request", args)
 		Experiments:UpdateStateFromAvailableExperiments(args)
 	end,
 
 	-- host_only: false
 	-- async: false
 	["PropagateExperimentReassignment"] = function (args)
-		Utilities.GBLog("Received experiment reassignment request")
+		Utilities.GBLog("Received experiment reassignment request", args)
 		Experiments:ProcessExperimentReassignmentRequest(args)
 	end
 }
