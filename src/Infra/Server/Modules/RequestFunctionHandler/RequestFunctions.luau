@@ -26,7 +26,7 @@ requestFunctions.funcs = {
 	-- host_only: true
 	-- async: true
 	["Ban"] = function(args)
-		local userIdentifier = args.user_identifier
+		local userIdentifier = args.playerId
 		local success
 		
 		-- We support UserIds + usernames from the dashboard
@@ -47,11 +47,11 @@ requestFunctions.funcs = {
 		end
 		
 		-- If nil, we use -1 (Ban API representation of perm)
-		local banTime = args.ban_duration or -1
+		local banTime = if args.unbanAt then args.unbanAt - (os.time() * 1000) else -1
 		
 		-- Execute ban action
 		local _, success = Utilities.promiseReturn(2, function()
-			Players:BanAsync({UserIds = {userIdentifier}, Duration = banTime, DisplayReason = args.reason, PrivateReason = args.private_reason, ExcludeAltAccounts = args.exclude_alts})
+			Players:BanAsync({UserIds = {userIdentifier}, Duration = banTime, DisplayReason = args.reason, PrivateReason = args.privateReason or args.reason, ExcludeAltAccounts = args.excludeAlts})
 		end)
 		
 		if not success then
@@ -62,7 +62,7 @@ requestFunctions.funcs = {
 	-- host_only: true
 	-- async: true
 	["Unban"] = function(args)
-		local userIdentifier = args.user_identifier
+		local userIdentifier = args.playerId
 		local success
 
 		-- We support UserIds + usernames from the dashboard
@@ -84,7 +84,7 @@ requestFunctions.funcs = {
 		
 		-- Execute unban action
 		local _, success = Utilities.promiseReturn(2, function()
-			Players:UnbanAsync({UserIds = {userIdentifier}})
+			Players:UnbanAsync({UserIds = {userIdentifier}, ApplyToUniverse = true})
 		end)
 
 		if not success then
@@ -95,7 +95,7 @@ requestFunctions.funcs = {
 	-- host_only: false
 	-- async: true
 	["Kick"] = function(args)
-		local userIdentifier = args.user_identifier
+		local userIdentifier = args.playerId
 		-- We support UserIds + usernames from the dashboard
 		if tonumber(userIdentifier) then
 			--
