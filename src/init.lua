@@ -162,6 +162,7 @@ local function StartSDK()
 	-- Set settings
 
 	local dataCacheModule = RequireModule(GetModule("DataCache"))
+	--NOTE: All modules that use settings should await them if they are needed during init.
 	dataCacheModule:Set("Settings", table.clone(DEFAULT_SETTINGS))
 
 	-- Require all modules

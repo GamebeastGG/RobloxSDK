@@ -114,6 +114,7 @@ end
 
 --YEILDS 
 function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any}, maxRetries : number?) : (boolean, any?)
+	local authKey = YeildForKey() -- Will wait for Key and Settings to be set
 	local GBDomain, requestMethod = GetEndpointForRequest(requestRoute)
 	
 	if not GBDomain or not requestMethod then
@@ -126,7 +127,6 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 	local requestBody
 	args = args or {}
 
-	local authKey = YeildForKey()
 
 	-- Define relevant headers. Backend enforces header presence unless specified.
 	local isStudio = RunService:IsStudio()
