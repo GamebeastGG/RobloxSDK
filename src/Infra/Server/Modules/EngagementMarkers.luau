@@ -214,6 +214,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		["markerId"] = HttpService:GenerateGUID(false),
 		["timestamp"] = metaData.timestampOverride or DateTime.now().UnixTimestampMillis,
 		["type"] = markerType,
+		["serverId"] = Utilities.getServerId(),
 		["userId"] = player and player.UserId, 
 		["sessionId"] = nil, -- Resolved later
 		["value"] = value,
