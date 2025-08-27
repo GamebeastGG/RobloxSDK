@@ -199,7 +199,8 @@ function PurchaseAnalytics:Init()
 	end)
 
 	-- Purchase records handler for products
-	MarketplaceService.PromptProductPurchaseFinished:Connect(function(playerId : number, productId : number, wasPurchased : boolean)
+	--NOTE: Disabled due to PromptProductPurchaseFinished being unreliable. Too many false positives.
+	--[[MarketplaceService.PromptProductPurchaseFinished:Connect(function(playerId : number, productId : number, wasPurchased : boolean)
 		if DevProductEventDebounce[playerId] then
 			return
 		end
@@ -211,7 +212,7 @@ function PurchaseAnalytics:Init()
 			task.wait(3)
 			DevProductEventDebounce[playerId] = nil
 		end
-	end)
+	end)]]
 
 	Players.PlayerRemoving:Connect(FlushProductPurchaseCache)
 end
