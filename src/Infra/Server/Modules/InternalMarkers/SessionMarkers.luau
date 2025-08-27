@@ -53,27 +53,6 @@ local LaunchDataFilter = DEFAULT_FILTER
 
 --= API Functions =--
 
-function SessionMarkers:SetLaunchDataFilter(filterArgs : {[string] : string | (any) -> boolean})
-	local argCount = 0
-	for _, _ in pairs(filterArgs) do
-		argCount += 1
-	end
-
-	if argCount > 4 then
-		error("LaunchDataFilter can only have up to 4 arguments, got " .. argCount)
-	end
-
-	for key, value in pairs(DEFAULT_FILTER) do
-		if filterArgs[key] ~= nil then
-			error(`LaunchDataFilter cannot override default key "{key}"`)
-		end
-		
-		filterArgs[key] = value
-	end
-
-	LaunchDataFilter = filterArgs
-end
-
 --= Initializers =--
 function SessionMarkers:Init()
 	Utilities:OnPlayerAdded(function(player : Player)
@@ -103,9 +82,8 @@ function SessionMarkers:Init()
 			local loginArgs = {
 				policyInfo = policyInfo,
 				publicServer = game.PrivateServerId == "",
-				metadata = {},
-				referrer = if isFriend ~= nil then {
-					type = "friend",
+				referrer = if joinData.ReferredByPlayerId then {
+					type = if isFriend then "friend" else "user",
 					id = joinData.ReferredByPlayerId
 				} else nil
 			}
@@ -147,10 +125,17 @@ function SessionMarkers:Init()
 									end
 								end
 
-								args.metadata = launchDataJson
+								if not args.referrer then
+									args.referrer = {
+										type = "deeplink",
+										id = nil,
+									}
+								end
+								
+								--args.metadata = launchDataJson
 							end
 						else
-							args.metadata = {}
+							--args.metadata = {}
 						end
 					end
 				}

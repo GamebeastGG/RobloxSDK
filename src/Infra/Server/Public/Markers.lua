@@ -20,7 +20,6 @@ local Players = game:GetService("Players")
 
 local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module EngagementMarkers
 local PurchaseAnalytics = shared.GBMod("PurchaseAnalytics") ---@module PurchaseAnalytics
-local SessionMarkers = shared.GBMod("SessionMarkers") ---@module SessionMarkers
 
 --= Types =--
 
@@ -53,10 +52,6 @@ function Markers:SendNewPurchaseGrantedMarker(recieptInfo : {[string] : number |
     task.spawn(function()
         PurchaseAnalytics:DevProductPurchased(true, recieptInfo.PlayerId, recieptInfo.ProductId, position)
     end)
-end
-
-function Markers:SetLaunchDataFilter(filterArgs : {[string] : string | (any) -> boolean})
-    SessionMarkers:SetLaunchDataFilter(filterArgs)
 end
 
 --= Return Module =--
