@@ -155,10 +155,10 @@ function SessionMarkers:Init()
 		-- Compute session length in addition to backend for reasons(?)
 		local clientJoinTime = ServerClientInfoHandler:GetClientInfo(player, "joinTime")
 		local sessionLength = Utilities.roundNum(os.time() - (clientJoinTime or PlayerStats:GetStat(player, "join_time")), 0.1)
-		local friendPlaytimePercent = SocialHandler:GetTotalFriendPlaytime(player)
+		local friendPlaytime = SocialHandler:GetTotalFriendPlaytime(player)
 		local args = {
 			["sessionLength"] = sessionLength,
-			["sessionLengthPercentageWithFriends"] = if friendPlaytimePercent then Utilities.roundNum(friendPlaytimePercent/sessionLength, 0.01) else nil
+			["sessionLengthPercentageWithFriends"] = if friendPlaytime then Utilities.roundNum(friendPlaytime/sessionLength, 0.01) else nil
 		}
 
 		local teleportingToPlace = PlayerStats:GetStat(player, "teleporting_to")

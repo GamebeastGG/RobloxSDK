@@ -63,7 +63,7 @@ function SocialHandler:GetTotalFriendPlaytime(player : Player) : number?
     local totalTime = ServerClientInfoHandler:GetClientInfo(player, "totalFriendPlaytime")
 
     if hasFriendsOnline then
-        return totalTime + (os.clock() - cachedData.LastClientUpdate)
+        return totalTime + (os.time() - cachedData.LastClientUpdate)
     else
         return totalTime
     end
@@ -76,7 +76,7 @@ function SocialHandler:Init()
 
         cacheEntry.Cleaner:Add(ServerClientInfoHandler:OnClientInfoChanged(player, function(key, _)
             if key == "friendClockStart" then
-                cacheEntry.LastClientUpdate = os.clock()
+                cacheEntry.LastClientUpdate = os.time()
             end
         end))
 

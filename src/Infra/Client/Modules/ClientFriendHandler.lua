@@ -63,9 +63,9 @@ local function UpdateFriendCache()
     local hasFriendsOnline = ClientInfoHandler:GetClientInfo("hasFriendsOnline") or false
 
     if hasFriendsOnline == true and foundFriendsOnline <= 0 then
-        ClientInfoHandler:UpdateClientInfo("totalFriendPlaytime", (ClientInfoHandler:GetClientInfo("totalFriendPlaytime") or 0) + os.clock() - (ClientInfoHandler:GetClientInfo("friendClockStart")))
+        ClientInfoHandler:UpdateClientInfo("totalFriendPlaytime", (ClientInfoHandler:GetClientInfo("totalFriendPlaytime") or 0) + os.time() - (ClientInfoHandler:GetClientInfo("friendClockStart")))
     elseif foundFriendsOnline > 0 and hasFriendsOnline == false then
-        ClientInfoHandler:UpdateClientInfo("friendClockStart", os.clock())
+        ClientInfoHandler:UpdateClientInfo("friendClockStart", os.time())
     end
 
     FriendsOnline = foundFriendsOnline
