@@ -39,6 +39,7 @@ local ENDPOINTS = {
 			["v1/requests/started"] = "PUT",
 			["v1/configurations"] = "GET",
 			["v1/latest/version?platform=roblox"] = "GET",
+			["v1/experiments"] = "GET",
 			["v1/experiments/assignments"] = "POST",
 			["v1/servers/roblox/{serverId}"] = "POST"
 		},

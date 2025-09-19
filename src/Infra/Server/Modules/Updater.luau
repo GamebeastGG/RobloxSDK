@@ -44,7 +44,7 @@ local MetaData = shared.GBMod("MetaData") ---@module MetaData
 	If it takes longer, it will continue waiting for assignment to complete in the
 	background, and apply assigned configs as they are received.
 ]]
-local MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME = 5
+local MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME = 10
 
 --= Object References =--
 

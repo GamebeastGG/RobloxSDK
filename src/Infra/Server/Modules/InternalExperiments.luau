@@ -6,8 +6,10 @@ local Players = game:GetService("Players")
 
 -- Dependencies
 local GBRequests = shared.GBMod("GBRequests")
-local Signal = shared.GBMod("Signal")
+local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal)
 local Utilities = shared.GBMod("Utilities")
+local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
 local Cleaner = shared.GBMod("Cleaner") ---@module Cleaner
 local Types = require(script.Parent.Parent.Parent.Types)
@@ -32,6 +34,8 @@ type AvailableExperimentsSnapshot = {
 	timestampMs: number,
 	groups: {AvailableExperimentGroupSnapshot},
 	scheduled: {[string]: {number}},
+	targetType: "gameserver" | "player" | nil,
+	requiredProperties: {string}?,
 }
 type ExperimentReassignmentPropagationRequest = {
 	playerIds: {string},
@@ -66,6 +70,75 @@ local BULK_ASSIGNMENT_SECONDS_TO_DEFER = 1
 local POST_EXPERIMENT_END_REASSIGNMENT_DELAY = 0
 
 --[[
+	How long assignment is willing to wait for available experiments to be fetched
+	before proceeding with assignment requests anyway.
+
+	This delay only happens when the full metadata for scheduled experiments that have
+	become active is still being fetched from the backend.
+]]
+local MAX_ASSIGNMENT_EXPERIMENTS_FETCH_DELAY = 3
+
+--[[
+	How long to wait for assignment metadata callbacks to finish, before skipping them
+	and proceeding with assignment without their result.
+]]
+local MAX_ASSIGNMENT_METADATA_CALLBACK_DURATION = 6
+
+--[[
+	When experiments have filters that require player properties, these
+	callbacks are ran to retrieve and include that metadata in assignment
+	requests.
+
+	These callbacks can yield, but ideally should not yield for too long. If a
+	callback yields for longer than `MAX_ASSIGNMENT_METADATA_CALLBACK_DURATION`
+	seconds, the assignment request will proceed without its result.
+]]
+local PLAYER_PROPERTY_GETTERS: {[string]: (player: Player) -> any} = {
+	inputType = function (player)
+		ServerClientInfoHandler:WaitUntilClientInfoResolved(player)
+		return ServerClientInfoHandler:GetClientInfo(player, "inputType")
+	end,
+	device = function (player)
+		ServerClientInfoHandler:WaitUntilClientInfoResolved(player)
+		return ServerClientInfoHandler:GetClientInfo(player, "device")
+	end,
+	deviceSubType = function (player)
+		ServerClientInfoHandler:WaitUntilClientInfoResolved(player)
+		return ServerClientInfoHandler:GetClientInfo(player, "deviceSubType")
+	end,
+	country = function (player)
+		return LocalizationCache:GetRegionId(player)
+	end,
+	language = function (player)
+		return LocalizationCache:GetLocaleId(player)
+	end,
+	placeId = function ()
+		return game.PlaceId
+	end,
+	placeVersion = function ()
+		return game.PlaceVersion
+	end,
+}
+
+--[[
+	When experiments have filters that require server properties, these
+	callbacks are ran to retrieve and include that metadata in assignment
+	requests.
+
+	These callbacks can yield, but ideally should not yield for too long. If a
+	callback yields for longer than `MAX_ASSIGNMENT_METADATA_CALLBACK_DURATION`
+	seconds, the assignment request will proceed without its result.
+]]
+local SERVER_PROPERTY_GETTERS: {[string]: () -> any} = {
+	placeId = function ()
+		return game.PlaceId
+	end,
+	placeVersion = function ()
+		return game.PlaceVersion
+	end,
+}
+
+--[[
 	Whether the application has any available experiments to request assignments for,
 	and has begun requesting them.
 ]]
@@ -93,6 +166,7 @@ local currentAssignmentState: {
 	unfetchedActiveGroupStateById: {[number]: {
 		endTime: number?,
 		experimentEndTimer: thread?,
+		onFetched: Signal.Signal,
 	}},
 
 }? = nil
@@ -106,6 +180,12 @@ local lastAvailableExperimentsSnapshot = nil :: AvailableExperimentsSnapshot?
 	These are created and terminated early based on received snapshots.
 ]]
 local assignmentWakeUpTimersByFutureGroupId = {} :: {[number]: thread}
+
+--[[
+	Thread for deferring proactively fetching the latest available experiments
+	from the backend, to consolidate multiple sequential requests into one.
+]]
+local deferredSnapshotFetchTimerThread = nil :: thread?
 
 Experiments.AssignedServerGroupId = nil :: number?
 Experiments.AssignedGroupIdByPlayer = {} :: {[Player]: number?}
@@ -127,6 +207,8 @@ Experiments.OnAssignmentDisabling = Signal.new()
 
 	If assignment is triggered on, this will yield as it requests and waits for
 	the initial assignments to be received from the backend.
+
+	@canyield
 ]]
 function Experiments:UpdateStateFromAvailableExperiments(
 	availableExperimentsSnapshot: AvailableExperimentsSnapshot,
@@ -162,7 +244,7 @@ function Experiments:UpdateStateFromAvailableExperiments(
 			if initializeActiveGroupState(group) then
 				didReceiveNewGroup = true
 			end
-			clearUnfetchedActiveGroupState(group.id)
+			clearUnfetchedActiveGroupState(group.id, true)
 		end
 
 		-- If snapshot just enabled assignment, trigger and wait for initial assignment
@@ -218,17 +300,10 @@ function Experiments:UpdateStateFromAvailableExperiments(
 		Utilities.GBLog("Scheduling future experiment group wake-up timer:", groupId, startTimeMs, "in", secondsUntilStart, "sec")
 		assignmentWakeUpTimersByFutureGroupId[groupId] = task.delay(secondsUntilStart, function ()
 			assignmentWakeUpTimersByFutureGroupId[groupId] = nil
-
-			if not currentAssignmentState then
-				Utilities.GBLog("Future experiment group", groupId, "started, enabling assignment")
-				enableAssignment()
-			else
-				Utilities.GBLog("Future experiment group", groupId, "started, assignment already enabled")
-				queueAssignmentForNonAssignedPlayers()
-			end
 			if currentAssignmentState then
 				initializeUnfetchedActiveGroupState(groupId, endTimeMs)
 			end
+			queueAvailableExperimentsSnapshotUpdate()
 		end)
 	end
 	for groupId, timer in assignmentWakeUpTimersByFutureGroupId do
@@ -465,11 +540,39 @@ function executeAssignmentRequest()
 		table.insert(knownGroupIds, groupId)
 	end
 
+	-- If there are unfetched groups, wait up to max delay for them to be fetched
+	-- (these may introduce new metadata required for assignment, which is retrieved next)
+	local pendingUnfetchedGroupCallbacks: {() -> ()} = {}
+	for _, unfetchedGroupState in assignmentState.unfetchedActiveGroupStateById do
+		table.insert(pendingUnfetchedGroupCallbacks, function ()
+			unfetchedGroupState.onFetched:Wait()
+		end)
+	end
+	Utilities.waitForAnyCall({
+		function ()
+			Utilities.waitForAllCalls(pendingUnfetchedGroupCallbacks)
+		end,
+		function ()
+			task.wait(MAX_ASSIGNMENT_EXPERIMENTS_FETCH_DELAY)
+		end,
+	})
+	if currentAssignmentState ~= assignmentState then
+		return
+	end
+
+	-- Retrieve metadata needed for assignment
+	local serverProperties, playerPropertiesByIdString = getMetadataForAssignment(playerIds, MAX_ASSIGNMENT_METADATA_CALLBACK_DURATION)
+	if currentAssignmentState ~= assignmentState then
+		return
+	end
+
 	Utilities.GBLog(`Requesting assignment (playerIds: {table.concat(playerIds, ", ")})...`)
 	local didSucceed, response = GBRequests:GBRequestAsync("v1/experiments/assignments", {
 		playerIds = playerIds,
 		knownGroupIds = knownGroupIds,
 		allowGameserverAssignment = true,
+		serverProperties = serverProperties,
+		playerProperties = playerPropertiesByIdString,
 	})
 	if currentAssignmentState ~= assignmentState then
 		return
@@ -503,7 +606,7 @@ function executeAssignmentRequest()
 	if assignmentResponse.groups then
 		for _, group in assignmentResponse.groups do
 			initializeActiveGroupState(group)
-			clearUnfetchedActiveGroupState(group.id)
+			clearUnfetchedActiveGroupState(group.id, true)
 		end
 	end
 
@@ -787,6 +890,7 @@ function initializeUnfetchedActiveGroupState(groupId: number, endTime: number?)
 	-- Initialize unfetched group state
 	currentAssignmentState.unfetchedActiveGroupStateById[groupId] = {
 		endTime = endTime,
+		onFetched = Signal.new(),
 	}
 
 	-- Start timer until the group's experiment ends, to forget about it
@@ -815,7 +919,7 @@ end
 	Called either when the group has been received from the backend,
 	or when it has ended or been terminated beforehand.
 ]]
-function clearUnfetchedActiveGroupState(groupId: number)
+function clearUnfetchedActiveGroupState(groupId: number, shouldFireFetchedSignal: boolean?)
 	if not currentAssignmentState then
 		return
 	end
@@ -827,6 +931,11 @@ function clearUnfetchedActiveGroupState(groupId: number)
 
 	if unfetchedGroupState.experimentEndTimer then
 		task.cancel(unfetchedGroupState.experimentEndTimer)
+	end
+
+	if shouldFireFetchedSignal then
+		unfetchedGroupState.onFetched:Fire()
+		unfetchedGroupState.onFetched:Destroy()
 	end
 
 	currentAssignmentState.unfetchedActiveGroupStateById[groupId] = nil
@@ -857,6 +966,116 @@ function queueAssignmentForNonAssignedPlayers()
 	if #nonAssignedPlayers > 0 then
 		Utilities.GBLog("New experiment groups available, queueing assignment for non-assigned players", nonAssignedPlayers)
 		queueAssignment(nonAssignedPlayers)
+	end
+end
+
+--[[
+	Queues fetching the latest available experiments snapshot from the backend
+	proactively (to get the latest full set of available experiments, including
+	ones that may have just started after having been scheduled).
+
+	This can trigger enabling assignment, or if already enabled, can trigger
+	reassignment for non-assigned players.
+
+	TODO: Consider only firing this on the host server, and propagating the
+	      fetched snapshot to other servers through a GB request.
+]]
+function queueAvailableExperimentsSnapshotUpdate()
+	if deferredSnapshotFetchTimerThread then
+		return
+	end
+
+	deferredSnapshotFetchTimerThread = task.delay(1, function ()
+		deferredSnapshotFetchTimerThread = nil
+
+		local didSucceed, response = GBRequests:GBRequestAsync("v1/experiments")
+		if not didSucceed then
+			Utilities.GBWarn("Failed to fetch available experiments snapshot:", response)
+			return
+		end
+
+		Experiments:UpdateStateFromAvailableExperiments(response)
+	end)
+end
+
+--[[
+	Retrieves and returns metadata needed for assigning the given players,
+	or the gameserver, based on the current experiment target type, and
+	the properties required by known, active experiment groups.
+
+	@canyield
+]]
+function getMetadataForAssignment(playerIds: {number}?, timeout: number?): ({[string]: any}?, {[string]: {[string]: any}}?)
+	local snapshot = lastAvailableExperimentsSnapshot
+	if not (snapshot and snapshot.targetType and snapshot.requiredProperties) then
+		return nil, nil
+	end
+
+	local serverProperties: {[string]: any} = {}
+	local playerPropertiesByIdString: {[string]: {[string]: any}} = {}
+
+	local metadataRetrievalCallbacks: {() -> ()} = {}
+
+	if snapshot.targetType == "gameserver" then
+		for _, property in snapshot.requiredProperties do
+			if not SERVER_PROPERTY_GETTERS[property] then
+				continue
+			end
+			table.insert(metadataRetrievalCallbacks, function ()
+				serverProperties[property] = SERVER_PROPERTY_GETTERS[property]()
+			end)
+		end
+
+	elseif snapshot.targetType == "player" and playerIds then
+		for _, playerId in playerIds do
+			local player = Players:GetPlayerByUserId(playerId)
+			if not player then
+				continue
+			end
+
+			local playerIdString = tostring(playerId)
+			playerPropertiesByIdString[playerIdString] = {}
+			local playerProperties = playerPropertiesByIdString[playerIdString]
+
+			-- Call each property getter in parallel to populate player metadata
+			for _, property in snapshot.requiredProperties do
+				if PLAYER_PROPERTY_GETTERS[property] then
+					table.insert(metadataRetrievalCallbacks, function ()
+						playerProperties[property] = PLAYER_PROPERTY_GETTERS[property](player)
+					end)
+				end
+			end
+		end
+	end
+
+	-- Yield until all population callbacks finish, or max duration is reached
+	if timeout then
+		Utilities.waitForAnyCall({
+			function ()
+				Utilities.waitForAllCalls(metadataRetrievalCallbacks)
+			end,
+			function ()
+				task.wait(timeout)
+			end,
+		})
+	else
+		Utilities.waitForAllCalls(metadataRetrievalCallbacks)
+	end
+
+	-- Remove empty player property containers (to avoid having them incorrectly serialized as arrays)
+	for playerIdString, playerProperties in playerPropertiesByIdString do
+		if next(playerProperties) == nil then
+			playerPropertiesByIdString[playerIdString] = nil
+		end
+	end
+
+	-- Return appropriate properties containers if they aren't empty
+	if snapshot.targetType == "gameserver" and next(serverProperties) then
+		return serverProperties, nil
+	elseif snapshot.targetType == "player" and next(playerPropertiesByIdString) then
+		return nil, playerPropertiesByIdString
+	else
+		return nil, nil
 	end
 end
 
