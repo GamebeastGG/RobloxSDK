@@ -9,6 +9,7 @@ local runService = game:GetService("RunService")
 local DataCache = shared.GBMod("DataCache")
 
 local MessagingServiceDebugCache = {} :: {[string] : number}
+local MessagingServiceRequestTimestamps = {}
 
 local utilities = {}
 
@@ -172,8 +173,25 @@ utilities.publishMessage = function(channel, message)
 		messagingService:PublishAsync(channel, message)
 	end)
 
+	-- Measure request rate for potential throttling issues
+	table.insert(MessagingServiceRequestTimestamps, {Time = os.clock()})
+	if #MessagingServiceRequestTimestamps > 100 then
+		table.remove(MessagingServiceRequestTimestamps, 1)
+	end
+
+	local total = #MessagingServiceRequestTimestamps
+	local avg = 0
+	
+	for _, req in MessagingServiceRequestTimestamps do
+		if os.clock() - req.Time < 60 then
+			avg += 1
+		end
+	end
+
+	avg /= total
+
 	if not success then
-		utilities.GBWarn(`Failed to publish message to channel: {channel} (Total count: {MessagingServiceDebugCache[channel]}) with error: {errorMessage}`)
+		utilities.GBWarn(`Failed to publish message to channel: {channel} (Req count on channel: {MessagingServiceDebugCache[channel]}, Avg. total req/min: {math.round(avg)}) with error: {errorMessage}`)
 	end
 end
 
