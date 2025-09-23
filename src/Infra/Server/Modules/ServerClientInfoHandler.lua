@@ -154,6 +154,50 @@ function ServerClientInfoHandler:IsClientInfoResolved(player : Player | number) 
     return ClientInfoCache[player] ~= nil
 end
 
+--[[
+    If the specific player's client info hasn't resolved, yields until it
+    resolves.
+
+    @canyield
+]]
+function ServerClientInfoHandler:WaitUntilClientInfoResolved(player: Player, timeout: number?)
+    if ServerClientInfoHandler:IsClientInfoResolved(player) then
+        return
+    end
+
+    local thread = coroutine.running()
+    local timeoutThread: thread? = nil
+    local didResume = false
+
+    -- Listen for resolution to trigger resumption
+    local resolveListener = self:OnClientInfoResolved(player, function ()
+        if not didResume then
+            didResume = true
+            coroutine.resume(thread)
+        end
+    end)
+
+    -- Listen for timeout to trigger early resumption
+    if timeout then
+        timeoutThread = task.delay(timeout, function ()
+            if not didResume then
+                timeoutThread = nil
+                didResume = true
+                coroutine.resume(thread)
+            end
+        end)
+    end
+
+    -- Wait until info resolves, or timeout is reached
+    coroutine.yield()
+
+    -- Clean up triggers before returning control
+    resolveListener:Disconnect()
+    if timeoutThread then
+        task.cancel(timeoutThread)
+    end
+end
+
 function ServerClientInfoHandler:GetProductPriceForPlayer(player : Player | number, productId : number, productType : Enum.InfoType) : number?
     if typeof(player) == "number" then
         player = Players:GetPlayerByUserId(player)
