@@ -216,4 +216,64 @@ function utilities:OnPlayerAdded(callback : (player : Player) -> ())
 	return game.Players.PlayerAdded:Connect(callback)
 end
 
+--[[
+	Calls the given functions in parallel, and waits for all of them to finish.
+]]
+function utilities.waitForAllCalls(callbacks: {[any]: () -> ()})
+	local suspendedThreadsRemaining = #callbacks
+	if suspendedThreadsRemaining == 0 then
+		return
+	end
+
+	local thread = coroutine.running()
+
+	for callbackIndex, callback in callbacks do
+		task.spawn(function ()
+			local didSucceed, result = pcall(callback)
+			if not didSucceed then
+				utilities.GBWarn(`Uncaught error in waitForAllCalls callback {callbackIndex}: {result}`)
+			end
+
+			suspendedThreadsRemaining -= 1
+			if suspendedThreadsRemaining == 0 then
+				coroutine.resume(thread)
+			end
+		end)
+	end
+
+	if suspendedThreadsRemaining > 0 then
+		coroutine.yield()
+	end
+end
+
+--[[
+	Calls the given functions in parallel, and waits until any of them finish.
+]]
+function utilities.waitForAnyCall(callbacks: {[any]: () -> ()})
+	if #callbacks == 0 then
+		return
+	end
+
+	local thread = coroutine.running()
+	local didResume = false
+
+	for callbackIndex, callback in callbacks do
+		task.spawn(function ()
+			local didSucceed, result = pcall(callback)
+			if not didSucceed then
+				utilities.GBWarn(`Uncaught error in waitForAnyCall callback {callbackIndex}: {result}`)
+			end
+
+			if not didResume then
+				didResume = true
+				coroutine.resume(thread)
+			end
+		end)
+	end
+
+	if not didResume then
+		coroutine.yield()
+	end
+end
+
 return utilities
