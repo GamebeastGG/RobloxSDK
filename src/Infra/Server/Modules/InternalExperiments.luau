@@ -610,7 +610,7 @@ function executeAssignmentRequest()
 		end
 	end
 
-	if (assignmentResponse.targetType == "gameserver") and assignmentResponse.gameserverGroupId then
+	if assignmentResponse.targetType == "gameserver" then
 		setAssignedServerGroupId(assignmentResponse.gameserverGroupId)
 
 		-- Clear previous per-player assignments, if any
@@ -618,7 +618,7 @@ function executeAssignmentRequest()
 			setAssignedPlayerGroupId(player, nil)
 		end
 
-	elseif (assignmentResponse.targetType == "player") and assignmentResponse.playerIdsByGroupId then
+	elseif assignmentResponse.targetType == "player" then
 		local assignedPlayerIdSet: {[number]: true} = {}
 		for groupIdString, groupPlayerIds in assignmentResponse.playerIdsByGroupId do
 			local groupId = tonumber(groupIdString) :: number
