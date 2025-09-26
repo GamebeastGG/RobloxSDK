@@ -52,7 +52,8 @@ local ALLOWED_VALUE_TYPES = {
 }
 local DROP_MARKER_CODES = {
 	["INVALID_MARKERS"] = true,
-	["SUBSCRIPTION_LIMIT_EXCEEDED"] = true
+	["SUBSCRIPTION_LIMIT_EXCEEDED"] = true,
+	["SUBSCRIPTION_UNPAID"] = true
 }
 
 --= Variables =--
