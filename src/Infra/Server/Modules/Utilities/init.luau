@@ -9,6 +9,8 @@ local runService = game:GetService("RunService")
 local DataCache = shared.GBMod("DataCache")
 
 local MessagingServiceDebugCache = {} :: {[string] : number}
+local MessagingServiceRequestTimestamps = {}
+local LastMessageTime = nil
 
 local utilities = {}
 
@@ -172,8 +174,27 @@ utilities.publishMessage = function(channel, message)
 		messagingService:PublishAsync(channel, message)
 	end)
 
+	-- Measure request rate for potential throttling issues
+	local avg = 0
+	if LastMessageTime then
+		local timeSinceLastMessage = os.clock() - LastMessageTime
+		
+		table.insert(MessagingServiceRequestTimestamps, {Time = timeSinceLastMessage})
+		if #MessagingServiceRequestTimestamps > 100 then
+			table.remove(MessagingServiceRequestTimestamps, 1)
+		end
+
+		for _, entry in MessagingServiceRequestTimestamps do
+			avg += entry.Time
+		end
+
+		avg = 60 / (avg / #MessagingServiceRequestTimestamps)
+	end
+
 	if not success then
-		utilities.GBWarn(`Failed to publish message to channel: {channel} (Total count: {MessagingServiceDebugCache[channel]}) with error: {errorMessage}`)
+		utilities.GBWarn(`Failed to publish message to channel: {channel} (Req count on channel: {MessagingServiceDebugCache[channel]}, Avg. total req/min: {math.round(avg)}) with error: {errorMessage}`)
+	else
+		LastMessageTime = os.clock()
 	end
 end
 
@@ -214,6 +235,66 @@ function utilities:OnPlayerAdded(callback : (player : Player) -> ())
 		task.spawn(callback, player)
 	end
 	return game.Players.PlayerAdded:Connect(callback)
+end
+
+--[[
+	Calls the given functions in parallel, and waits for all of them to finish.
+]]
+function utilities.waitForAllCalls(callbacks: {[any]: () -> ()})
+	local suspendedThreadsRemaining = #callbacks
+	if suspendedThreadsRemaining == 0 then
+		return
+	end
+
+	local thread = coroutine.running()
+
+	for callbackIndex, callback in callbacks do
+		task.spawn(function ()
+			local didSucceed, result = pcall(callback)
+			if not didSucceed then
+				utilities.GBWarn(`Uncaught error in waitForAllCalls callback {callbackIndex}: {result}`)
+			end
+
+			suspendedThreadsRemaining -= 1
+			if suspendedThreadsRemaining == 0 then
+				coroutine.resume(thread)
+			end
+		end)
+	end
+
+	if suspendedThreadsRemaining > 0 then
+		coroutine.yield()
+	end
+end
+
+--[[
+	Calls the given functions in parallel, and waits until any of them finish.
+]]
+function utilities.waitForAnyCall(callbacks: {[any]: () -> ()})
+	if #callbacks == 0 then
+		return
+	end
+
+	local thread = coroutine.running()
+	local didResume = false
+
+	for callbackIndex, callback in callbacks do
+		task.spawn(function ()
+			local didSucceed, result = pcall(callback)
+			if not didSucceed then
+				utilities.GBWarn(`Uncaught error in waitForAnyCall callback {callbackIndex}: {result}`)
+			end
+
+			if not didResume then
+				didResume = true
+				coroutine.resume(thread)
+			end
+		end)
+	end
+
+	if not didResume then
+		coroutine.yield()
+	end
 end
 
 return utilities

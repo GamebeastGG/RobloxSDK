@@ -16,9 +16,11 @@ local SessionMarkers = { }
 
 --= Roblox Services =--
 
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local PolicyService = game:GetService("PolicyService")
 local AssetService = game:GetService("AssetService")
+local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
@@ -34,10 +36,16 @@ local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@modu
 
 --= Constants =--
 
+local IS_STUDIO = RunService:IsStudio()
+local DEFAULT_FILTER = {
+	--["GB_SOURCE"] = "string",
+}
+
 --= Variables =--
 
 local LastCharPositions = {}
 local PlacesInUniverse = {}
+local LaunchDataFilter = DEFAULT_FILTER
 
 --= Public Variables =--
 
@@ -63,11 +71,75 @@ function SessionMarkers:Init()
 				return PolicyService:GetPolicyInfoForPlayerAsync(player)
 			end)
 
+			-- Populate referrer data if available
+			local isFriend;
+			if joinData.ReferredByPlayerId then
+				isFriend = Utilities.promiseReturn(1, function()
+					return player:IsFriendsWith(joinData.ReferredByPlayerId)
+				end)
+			end
+
 			local loginArgs = {
-				policyInfo = policyInfo
+				policyInfo = policyInfo,
+				publicServer = game.PrivateServerId == "",
+				referrer = if joinData.ReferredByPlayerId then {
+					type = if isFriend then "friend" else "user",
+					id = joinData.ReferredByPlayerId
+				} else nil
 			}
 
-			EngagementMarkers:SDKMarker("Login", loginArgs, {player = player, position = nil})
+			EngagementMarkers:SDKMarker("Login", loginArgs, {player = player, position = nil,
+				-- Add task to wait for join data
+				tasks = {
+					launchData = function(args)
+						if IS_STUDIO then
+							return
+						end
+
+
+						local launchData = joinData.LaunchData
+						local attemptCount = 0
+
+						while attemptCount < 10 and launchData == "" do
+							task.wait(0.5)
+							attemptCount += 1
+
+							local latestJoinData = player:GetJoinData()
+							launchData = latestJoinData.LaunchData
+						end
+
+						if launchData ~= "" then
+							local success, launchDataJson = pcall(function()
+								return HttpService:JSONDecode(launchData)
+							end)
+
+							if success then
+								for key, filter in LaunchDataFilter do
+									if type(filter) == "function" then
+										local valid = filter(launchDataJson[key])
+										if valid == false then
+											launchDataJson[key] = nil
+										end
+									elseif type(launchDataJson[key]) ~= filter then
+										launchDataJson[key] = nil
+									end
+								end
+
+								if not args.referrer then
+									args.referrer = {
+										type = "deeplink",
+										id = nil,
+									}
+								end
+								
+								--args.metadata = launchDataJson
+							end
+						else
+							--args.metadata = {}
+						end
+					end
+				}
+			})
 
 			PlayerStats:OnDefaultStatsResolved(function()
 				ServerClientInfoHandler:UpdateClientData(player, "joinTime", PlayerStats:GetStat(player, "join_time"))
@@ -83,10 +155,10 @@ function SessionMarkers:Init()
 		-- Compute session length in addition to backend for reasons(?)
 		local clientJoinTime = ServerClientInfoHandler:GetClientInfo(player, "joinTime")
 		local sessionLength = Utilities.roundNum(os.time() - (clientJoinTime or PlayerStats:GetStat(player, "join_time")), 0.1)
-		local friendPlaytimePercent = SocialHandler:GetTotalFriendPlaytime(player)
+		local friendPlaytime = SocialHandler:GetTotalFriendPlaytime(player)
 		local args = {
 			["sessionLength"] = sessionLength,
-			["sessionLengthPercentageWithFriends"] = if friendPlaytimePercent then Utilities.roundNum(friendPlaytimePercent/sessionLength, 0.01) else nil
+			["sessionLengthPercentageWithFriends"] = if friendPlaytime then Utilities.roundNum(friendPlaytime/sessionLength, 0.01) else nil
 		}
 
 		local teleportingToPlace = PlayerStats:GetStat(player, "teleporting_to")

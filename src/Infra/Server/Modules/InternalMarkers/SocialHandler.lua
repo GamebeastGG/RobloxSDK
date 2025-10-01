@@ -63,7 +63,7 @@ function SocialHandler:GetTotalFriendPlaytime(player : Player) : number?
     local totalTime = ServerClientInfoHandler:GetClientInfo(player, "totalFriendPlaytime")
 
     if hasFriendsOnline then
-        return totalTime + (os.clock() - cachedData.LastClientUpdate)
+        return totalTime + (os.time() - cachedData.LastClientUpdate)
     else
         return totalTime
     end
@@ -74,17 +74,9 @@ function SocialHandler:Init()
     local function playerAdded(player : Player)
         local cacheEntry = CreateCacheEntry(player)
 
-        local joinData = player:GetJoinData()
-        if joinData.ReferredByPlayerId and joinData.ReferredByPlayerId > 0 then
-            EngagementMarkers:SDKMarker("JoinedUser", {
-                userId = joinData.ReferredByPlayerId,
-                isFriend = player:IsFriendsWith(joinData.ReferredByPlayerId),
-            }, { player = player })
-        end
-
         cacheEntry.Cleaner:Add(ServerClientInfoHandler:OnClientInfoChanged(player, function(key, _)
             if key == "friendClockStart" then
-                cacheEntry.LastClientUpdate = os.clock()
+                cacheEntry.LastClientUpdate = os.time()
             end
         end))
 

@@ -30,6 +30,7 @@ local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
 local FailedMarkers = shared.GBMod("FailedMarkers") ---@module FailedMarkers
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
 local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
+local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
 local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
 local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 
@@ -51,7 +52,8 @@ local ALLOWED_VALUE_TYPES = {
 }
 local DROP_MARKER_CODES = {
 	["INVALID_MARKERS"] = true,
-	["SUBSCRIPTION_LIMIT_EXCEEDED"] = true
+	["SUBSCRIPTION_LIMIT_EXCEEDED"] = true,
+	["SUBSCRIPTION_UNPAID"] = true
 }
 
 --= Variables =--
@@ -213,6 +215,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		["markerId"] = HttpService:GenerateGUID(false),
 		["timestamp"] = metaData.timestampOverride or DateTime.now().UnixTimestampMillis,
 		["type"] = markerType,
+		["serverId"] = Utilities.getServerId(),
 		["userId"] = player and player.UserId, 
 		["sessionId"] = nil, -- Resolved later
 		["value"] = value,
@@ -307,16 +310,37 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			end
 		end
 
+		-- Check for custom tasks
+		if metaData.tasks then
+			for taskName, taskFunction in metaData.tasks do
+				local connection = SignalConnection.new(function()
+					completeTask(taskName)
+				end)
+
+				addTask(taskName, connection)
+
+				task.spawn(function()
+					taskFunction(value)
+					connection:Disconnect()
+					completeTask(taskName)
+				end)
+			end
+		end
+
 		-- Stop wating after some time if tasks are not resolved
 		local dataFetchTimer = Timer.new(CLIENT_DATA_TIMEOUT)
 		pendingMarkerData.pendingCleaner:Add(dataFetchTimer)
 		pendingMarkerData.pendingCleaner:Add(dataFetchTimer:OnEnd(function()
+			if not pendingMarkerData.tasks["clientInfo"] then
+				return
+			end
+
 			if not ServerClientInfoHandler:IsClientInfoResolved(player) and ClientInfoWarned == false then
 				Utilities.GBWarn("Failed to resolve client info, did you forget to :Setup() Gamebeast SDK on the client?")
 				ClientInfoWarned = true
 			end
 
-			resolved()
+			completeTask("clientInfo")
 		end))
 
 		if player then -- Ensure marker gets fired with device info on timeout or bind to close

@@ -42,6 +42,9 @@ end
 
 --= API Functions =--
 
+--[[
+    @canyield
+]]
 function LocalizationCache:GetRegionId(player : Player | number)
     player = Utilities.resolvePlayerObject(player)
 
@@ -64,6 +67,9 @@ function LocalizationCache:GetRegionId(player : Player | number)
     return regionId or "unknown"
 end
 
+--[[
+    @canyield
+]]
 function LocalizationCache:GetLocaleId(player : Player | number)
     player = Utilities.resolvePlayerObject(player)
 
