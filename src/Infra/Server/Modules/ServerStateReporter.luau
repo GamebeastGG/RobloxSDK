@@ -105,9 +105,9 @@ function ServerStateReporter:PrepareServerStateReport()
         players = userIds,
         metadata = {
             clientPing = AggregateMetric(metricHistory.ClientPing),
-            clientMemoryUsage = AggregateMetric(metricHistory.ClientMemoryUsage),
+            --clientMemoryUsage = AggregateMetric(metricHistory.ClientMemoryUsage),
             clientFps = AggregateMetric(metricHistory.ClientPhysicsFps),
-            serverMemoryUsage = AggregateMetric(metricHistory.MemoryUsage),
+            --serverMemoryUsage = AggregateMetric(metricHistory.MemoryUsage),
             serverFps = AggregateMetric(metricHistory.PhysicsFps),
             serverAgeSeconds = workspace.DistributedGameTime,
             matchmakingType = game.MatchmakingType.Name,
@@ -123,7 +123,7 @@ function ServerStateReporter:Init()
     -- probe metrics on timer
     task.spawn(function()
         while task.wait(PROBE_FREQUENCY) do
-            MetricCollector:ReportMetric("MemoryUsage", Stats:GetTotalMemoryUsageMb())
+            --MetricCollector:ReportMetric("MemoryUsage", Stats:GetTotalMemoryUsageMb())
             MetricCollector:ReportMetric("PhysicsFps", workspace:GetRealPhysicsFPS())
         end
     end)
@@ -141,14 +141,14 @@ function ServerStateReporter:Init()
         -- and probes every 1 second, so in theory it's always going to be 10 values
         -- this also prevents the client from sending unlimited values 
         for i = 1, 10 do
-            local memoryUsage = metrics.MemoryUsage[i]
+            --local memoryUsage = metrics.MemoryUsage[i]
             local physicsFps = metrics.PhysicsFps[i]
             local ping = metrics.Ping[i]
 
-            -- ensure memory is a number, and is within reasonable bounds
+            --[[ ensure memory is a number, and is within reasonable bounds
             if type(memoryUsage) == "number" and memoryUsage >= 0 and memoryUsage < 100000 then
                 MetricCollector:ReportMetric("ClientMemoryUsage", memoryUsage)
-            end
+            end]]
 
             -- ensure fps is a number and within reasonable bounds
             -- 360 is written here since refresh rates are usually under 360
