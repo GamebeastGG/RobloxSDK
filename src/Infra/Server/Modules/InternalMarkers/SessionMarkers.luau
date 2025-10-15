@@ -25,6 +25,7 @@ local RunService = game:GetService("RunService")
 --= Dependencies =--
 
 local Utilities = shared.GBMod("Utilities")
+local LaunchDataResolver = shared.GBMod("LaunchDataResolver") ---@module LaunchDataResolver
 local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
 local PlayerStats = shared.GBMod("PlayerStats") ---@module PlayerStats
 local SocialHandler = shared.GBMod("SocialHandler") ---@module SocialHandler
@@ -36,16 +37,10 @@ local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@modu
 
 --= Constants =--
 
-local IS_STUDIO = RunService:IsStudio()
-local DEFAULT_FILTER = {
-	--["GB_SOURCE"] = "string",
-}
-
 --= Variables =--
 
 local LastCharPositions = {}
 local PlacesInUniverse = {}
-local LaunchDataFilter = DEFAULT_FILTER
 
 --= Public Variables =--
 
@@ -88,58 +83,22 @@ function SessionMarkers:Init()
 				} else nil
 			}
 
-			EngagementMarkers:SDKMarker("Login", loginArgs, {player = player, position = nil,
-				-- Add task to wait for join data
-				tasks = {
-					launchData = function(args)
-						if IS_STUDIO then
-							return
-						end
+			LaunchDataResolver:OnResolved(player, function(launchData)
+				if launchData._gbDeeplink then
+					loginArgs.referrer = {
+						type = "gamebeastDeeplink",
+						id = launchData._gbDeeplink.deeplinkId
+					}
+				elseif not loginArgs.referrer then
+					loginArgs.referrer = {
+						type = "deeplink",
+						id = nil,
+					}
+				end
 
 
-						local launchData = joinData.LaunchData
-						local attemptCount = 0
-
-						while attemptCount < 10 and launchData == "" do
-							task.wait(0.5)
-							attemptCount += 1
-
-							local latestJoinData = player:GetJoinData()
-							launchData = latestJoinData.LaunchData
-						end
-
-						if launchData ~= "" then
-							local success, launchDataJson = pcall(function()
-								return HttpService:JSONDecode(launchData)
-							end)
-
-							if success then
-								for key, filter in LaunchDataFilter do
-									if type(filter) == "function" then
-										local valid = filter(launchDataJson[key])
-										if valid == false then
-											launchDataJson[key] = nil
-										end
-									elseif type(launchDataJson[key]) ~= filter then
-										launchDataJson[key] = nil
-									end
-								end
-
-								if not args.referrer then
-									args.referrer = {
-										type = "deeplink",
-										id = nil,
-									}
-								end
-								
-								--args.metadata = launchDataJson
-							end
-						else
-							--args.metadata = {}
-						end
-					end
-				}
-			})
+				EngagementMarkers:SDKMarker("Login", loginArgs, {player = player, position = nil})
+			end)
 
 			PlayerStats:OnDefaultStatsResolved(function()
 				ServerClientInfoHandler:UpdateClientData(player, "joinTime", PlayerStats:GetStat(player, "join_time"))

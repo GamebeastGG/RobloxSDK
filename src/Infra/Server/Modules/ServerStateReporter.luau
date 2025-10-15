@@ -15,9 +15,6 @@ local ServerStateReporter = {}
 
 --= Roblox Services =--
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local HttpService = game:GetService("HttpService")
-local Stats = game:GetService("Stats")
 
 --= Dependencies =--
 local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
