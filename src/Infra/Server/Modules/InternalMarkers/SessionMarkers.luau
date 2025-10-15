@@ -77,25 +77,26 @@ function SessionMarkers:Init()
 			local loginArgs = {
 				policyInfo = policyInfo,
 				publicServer = game.PrivateServerId == "",
-				referrer = if joinData.ReferredByPlayerId then {
+				referrer = if joinData.ReferredByPlayerId and joinData.ReferredByPlayerId ~= 0 then {
 					type = if isFriend then "friend" else "user",
 					id = joinData.ReferredByPlayerId
 				} else nil
 			}
 
 			LaunchDataResolver:OnResolved(player, function(launchData)
-				if launchData._gbDeeplink then
-					loginArgs.referrer = {
-						type = "gamebeastDeeplink",
-						id = launchData._gbDeeplink.deeplinkId
-					}
-				elseif not loginArgs.referrer then
-					loginArgs.referrer = {
-						type = "deeplink",
-						id = nil,
-					}
+				if launchData then
+					if launchData._gbDeeplink then
+						loginArgs.referrer = {
+							type = "gamebeastDeeplink",
+							id = launchData._gbDeeplink.deeplinkId
+						}
+					elseif not loginArgs.referrer then
+						loginArgs.referrer = {
+							type = "deeplink",
+							id = nil,
+						}
+					end
 				end
-
 
 				EngagementMarkers:SDKMarker("Login", loginArgs, {player = player, position = nil})
 			end)
