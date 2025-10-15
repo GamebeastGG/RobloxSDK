@@ -35,9 +35,11 @@ local InternalConfigs = shared.GBMod("InternalConfigs") -- RECURSIVE!
 -- How often we check for new requests from GB dashboard
 local UPDATE_PERIOD = 1
 -- 1024 byte limit in docs but less in practice because of metadata. Not exactly calculated but this will never exceed the limit.
-local MESSAGE_SIZE_LIMIT = 800
+local MESSAGE_SIZE_LIMIT = 950
+-- Bytes reserved in chunked request messages to fit chunk metadata
+local MESSAGE_CHUNK_METADATA_RESERVED_BYTES = 50
 -- Subscription topic name for direct requests from GB
-local GB_MESSAGING_TOPIC = "GB_REQ_MESSAGE"
+local GB_MESSAGING_TOPIC = "GB_REQ_MESSAGE_V2"
 
 --= Variables =--
 
@@ -120,7 +122,7 @@ function RequestFunctionHandler:ExecuteRequests(requests : {})
                         request.chunked = true
 
                         -- Make chunks as large as possible to send fewest messages, accounting for chunk metadata we're adding too
-                        local argsChunkSize = MESSAGE_SIZE_LIMIT - ((#requestString + 150) - #argsString)
+                        local argsChunkSize = MESSAGE_SIZE_LIMIT - MESSAGE_CHUNK_METADATA_RESERVED_BYTES - (#requestString - #argsString)
 
                         -- We can only chunk args, so if the request itself is larger than the limit, abort
                         if argsChunkSize <= 0 then
@@ -130,15 +132,31 @@ function RequestFunctionHandler:ExecuteRequests(requests : {})
                         end
 
                         local argChunks = {}
-                        local chunkText
-                        local curIndex = 1
 
                         -- Generate message chunks at determined size
-                        repeat
-                            chunkText = string.sub(argsString, curIndex, curIndex + argsChunkSize - 1)
-                            curIndex += argsChunkSize
-                            table.insert(argChunks, chunkText)
-                        until #chunkText < argsChunkSize
+                        local nextChunkStart = 1
+                        local nextEscapeCharacterAt: number? = nil
+                        while nextChunkStart <= string.len(argsString) do
+                            local targetChunkEnd = nextChunkStart + argsChunkSize - 1
+
+                            -- Shrink chunk size for each escape character that will overflow from it
+                            local searchStart = nextChunkStart
+                            while searchStart <= targetChunkEnd and nextChunkStart < targetChunkEnd do
+                                nextEscapeCharacterAt = nextEscapeCharacterAt
+                                    or string.find(argsString, `["\\]`, searchStart)
+                                    or math.huge
+                                if nextEscapeCharacterAt and nextEscapeCharacterAt <= targetChunkEnd then
+                                    targetChunkEnd -= 1
+                                    searchStart = nextEscapeCharacterAt + 1
+                                    nextEscapeCharacterAt = nil
+                                else
+                                    break
+                                end
+                            end
+
+                            table.insert(argChunks, string.sub(argsString, nextChunkStart, targetChunkEnd))
+                            nextChunkStart = targetChunkEnd + 1
+                        end
 
                         -- Let recipient servers how many chunks to expect before reconstruction
                         request.chunks = #argChunks
@@ -149,13 +167,13 @@ function RequestFunctionHandler:ExecuteRequests(requests : {})
                             request.chunk_id = i
 
                             task.spawn(function()
-                                Utilities.publishMessage(GB_MESSAGING_TOPIC, HttpService:JSONEncode({request}))
+                                Utilities.publishMessage(GB_MESSAGING_TOPIC, {request})
                             end)
                         end
                     else
                         -- No chunking needed, send full message to other servers
                         task.spawn(function()
-                            Utilities.publishMessage(GB_MESSAGING_TOPIC, HttpService:JSONEncode({request}))
+                            Utilities.publishMessage(GB_MESSAGING_TOPIC, {request})
                         end)
                     end
                 end
@@ -223,7 +241,7 @@ function RequestFunctionHandler:Init()
     -- Receive requests from host server and other sources
 	Utilities.promiseReturn(nil, function()
 		MessagingService:SubscribeAsync(GB_MESSAGING_TOPIC, function(message)
-			local decodedRequests = HttpService:JSONDecode(message.Data)
+			local decodedRequests = message.Data
 			local newRequests = {}
 
 			for _, request in decodedRequests do
