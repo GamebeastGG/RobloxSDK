@@ -33,17 +33,28 @@ local LaunchDataResolvedSignal = Signal.new()
 
 --= Variables =--
 
+local DidResolveCache = {}
 local LaunchDataCache = {}
 
 --= Public Variables =--
 
 --= Internal Functions =--
 
+function ResolveData(player : Player, data : any)
+    DidResolveCache[player] = true
+    LaunchDataCache[player] = data
+
+    LaunchDataResolvedSignal:Fire(player, data)
+end
+
 --= API Functions =--`
 
 function LaunchDataResolver:OnResolved(player : Player, callback : (any) -> ()) : RBXScriptConnection?
-    if LaunchDataCache[player] then
-        callback(LaunchDataCache[player])
+    if DidResolveCache[player] then
+        task.spawn(function()
+            callback(LaunchDataCache[player])
+        end)
+
         return nil
     end
 
@@ -62,7 +73,7 @@ function LaunchDataResolver:Init()
     Utilities:OnPlayerAdded(function(player : Player)
 
         if RunService:IsStudio() then
-            LaunchDataResolvedSignal:Fire(player, nil)
+            ResolveData(player, nil)
             return
         end
 
@@ -84,21 +95,20 @@ function LaunchDataResolver:Init()
             end)
 
             if success then
-                LaunchDataCache[player] = launchDataJson
-                LaunchDataResolvedSignal:Fire(player, launchDataJson)
+                ResolveData(player, launchDataJson)
                 return
             else
                 Utilities.GBLog("Failed to decode launch data JSON for player " .. player.Name .. ": " .. tostring(launchDataJson))
             end
         end
 
-        LaunchDataResolvedSignal:Fire(player, nil)
-
+        ResolveData(player, nil)
     end)
 
     Players.PlayerRemoving:Connect(function(player : Player)
         task.defer(function()
             LaunchDataCache[player] = nil
+            DidResolveCache[player] = nil
         end)
     end)
 end

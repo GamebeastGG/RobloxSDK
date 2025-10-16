@@ -202,6 +202,7 @@ end
 
 function Gamebeast:GetService(name : string) : Types.Service
 	StartSDK()
+	name = string.gsub(name, "Service", "")
 
 	local module = GetPublicModule(name)
 	if module then
