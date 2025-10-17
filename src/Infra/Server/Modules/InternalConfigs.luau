@@ -158,7 +158,7 @@ function InternalConfigs:OnReady(callback : (newConfigs : any) -> ())
 	if not ConfigsReady then
 		ConfigReadySignal:Once(callback)
 	else
-		task.spawn(callback)
+		task.spawn(callback, ActiveConfigs.DevConfigs)
 	end
 end
 
@@ -451,10 +451,9 @@ function InternalConfigs:ApplyConfigs(player: Player?, newConfigs: {[string]: an
 	--table.freeze(clientConfigs)
 	
 	--TODO:
-	if newConfigs and next(newConfigs) ~= nil then
-		ConfigsReady = true
-		ConfigReadySignal:Fire(newConfigs)
-	end
+	ConfigsReady = true
+
+	ConfigReadySignal:Fire(newConfigs)
 	--ConfigUpdatedSignal:Fire(path, newValue, oldValue)
 end
 
