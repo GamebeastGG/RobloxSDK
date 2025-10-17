@@ -33,10 +33,10 @@ export type SignalConnection = {
 
 --= Constructor =--
 
-function SignalConnection.new(onDisconnect : () -> ()) : SignalConnection
+function SignalConnection.new(onDisconnect : () -> ()?) : SignalConnection
     local self = setmetatable({}, SignalConnection)
 
-    self.Connected = true
+    self.Connected = onDisconnect ~= nil
     self._callback = onDisconnect
 
     return self

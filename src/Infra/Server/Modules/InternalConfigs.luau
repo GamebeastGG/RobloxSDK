@@ -20,6 +20,7 @@ local Players = game:GetService("Players")
 local Utilities = shared.GBMod("Utilities")
 local GetRemote = shared.GBMod("GetRemote")
 local Signal = shared.GBMod("Signal")
+local SignalConnection = shared.GBMod("SignalConnection")
 
 --= Types =--
 
@@ -154,11 +155,12 @@ function InternalConfigs:IsReady() : boolean
 	return ConfigsReady
 end
 
-function InternalConfigs:OnReady(callback : (newConfigs : any) -> ())
+function InternalConfigs:OnReady(callback : (newConfigs : any) -> ()) : RBXScriptConnection
 	if not ConfigsReady then
-		ConfigReadySignal:Once(callback)
+		return ConfigReadySignal:Once(callback)
 	else
 		task.spawn(callback, ActiveConfigs.DevConfigs)
+		return SignalConnection.new()
 	end
 end
 
