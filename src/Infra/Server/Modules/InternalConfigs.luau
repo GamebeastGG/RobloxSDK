@@ -158,7 +158,7 @@ function InternalConfigs:OnReady(callback : (newConfigs : any) -> ())
 	if not ConfigsReady then
 		ConfigReadySignal:Once(callback)
 	else
-		task.spawn(callback)
+		task.spawn(callback, ActiveConfigs.DevConfigs)
 	end
 end
 
