@@ -12,7 +12,6 @@
 local ClientMetricExporter = {}
 
 --= Roblox Services =--
-local Stats = game:GetService("Stats")
 local Players = game:GetService("Players")
 
 --= Dependencies =--
