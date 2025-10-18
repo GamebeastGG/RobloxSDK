@@ -35,7 +35,9 @@ function ClientMetricExporter:Init()
     -- probe metrics on timer
     task.spawn(function()
         while task.wait(PROBE_FREQUENCY) do
-            MetricCollector:ReportMetric("MemoryUsage", Stats:GetTotalMemoryUsageMb())
+			if Stats.MemoryTrackingEnabled then
+            	MetricCollector:ReportMetric("MemoryUsage", Stats:GetTotalMemoryUsageMb())
+			end
             MetricCollector:ReportMetric("PhysicsFps", workspace:GetRealPhysicsFPS())
             MetricCollector:ReportMetric("Ping", Players.LocalPlayer:GetNetworkPing())
         end
