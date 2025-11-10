@@ -19,6 +19,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GetRemote = shared.GBMod("GetRemote")
 local Signal = shared.GBMod("Signal")
+local SignalConnection = shared.GBMod("SignalConnection")
 
 --= Types =--
 
@@ -111,7 +112,12 @@ function ClientConfigs:OnChanged(targetConfig : string | {string}, callback : (n
 end
 
 function ClientConfigs:OnReady(callback : (configs : any) -> ()) : RBXScriptConnection
-    return ConfigReadySignal:Connect(function()
+    if ConfigsReady then
+        task.spawn(callback, CachedConfigs)
+        return SignalConnection.new()
+    end
+
+    return ConfigReadySignal:Once(function()
         callback(CachedConfigs)
     end)
 end

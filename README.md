@@ -1,5 +1,5 @@
 # [Gamebeast](https://gamebeast.gg/) Roblox SDK
-*Documentaion: https://docs.gamebeast.gg/*
+*Documentation: https://docs.gamebeast.gg/*
 
 This SDK is intended for use with the Roblox platform.
 

@@ -12,7 +12,6 @@
 local ClientMetricExporter = {}
 
 --= Roblox Services =--
-local Stats = game:GetService("Stats")
 local Players = game:GetService("Players")
 
 --= Dependencies =--
@@ -35,7 +34,8 @@ function ClientMetricExporter:Init()
     -- probe metrics on timer
     task.spawn(function()
         while task.wait(PROBE_FREQUENCY) do
-            MetricCollector:ReportMetric("MemoryUsage", Stats:GetTotalMemoryUsageMb())
+            --NOTE: MemoryUsage disabled by Roblox. 
+            --MetricCollector:ReportMetric("MemoryUsage", Stats:GetTotalMemoryUsageMb())
             MetricCollector:ReportMetric("PhysicsFps", workspace:GetRealPhysicsFPS())
             MetricCollector:ReportMetric("Ping", Players.LocalPlayer:GetNetworkPing())
         end

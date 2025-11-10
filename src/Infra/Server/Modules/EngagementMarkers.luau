@@ -22,16 +22,15 @@ local RunService = game:GetService("RunService")
 
 local Timer = shared.GBMod("Timer") ---@module Timer
 local Cleaner = shared.GBMod("Cleaner")
-local MetaData = shared.GBMod("MetaData")
-local GetRemote = shared.GBMod("GetRemote")
 local Utilities = shared.GBMod("Utilities")
 local HostServer = shared.GBMod("HostServer") ---@module HostServer
 local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
+local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
 local FailedMarkers = shared.GBMod("FailedMarkers") ---@module FailedMarkers
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
-local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
 local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
 local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
+local LaunchDataResolver = shared.GBMod("LaunchDataResolver") ---@module LaunchDataResolver
 local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 
 --= Types =--
@@ -210,7 +209,6 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 	
 	-- Marker fields
 	
-
 	local entry = {
 		["markerId"] = HttpService:GenerateGUID(false),
 		["timestamp"] = metaData.timestampOverride or DateTime.now().UnixTimestampMillis,
@@ -227,6 +225,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			["device"] = nil, -- Resolved later
 			["deviceSubType"] = nil, -- Resolved later
 			["inputType"] = nil, -- Resolved later
+			["deeplinkData"] = nil, -- Resolved later
 			["position"] = position ~= nil and EncodeVector3(position) or nil,
 			["language"] = player and LocalizationCache:GetLocaleId(player) or nil,
 			["country"] = player and LocalizationCache:GetRegionId(player) or nil,
@@ -343,11 +342,22 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			completeTask("clientInfo")
 		end))
 
-		if player then -- Ensure marker gets fired with device info on timeout or bind to close
-			addTask("clientInfo", ServerClientInfoHandler:OnClientInfoResolved(player, function()
-				completeTask("clientInfo")
-			end))
-		end
+		-- Ensure marker gets fired with device info on timeout or bind to close
+		addTask("clientInfo", ServerClientInfoHandler:OnClientInfoResolved(player, function()
+			completeTask("clientInfo")
+		end))
+
+		-- Ensure we have launch data if available
+		addTask("launchData", LaunchDataResolver:OnResolved(player, function(launchData)
+			if launchData and launchData._gbDeeplink then
+				entry.properties.deeplinkData = {
+					["id"] = launchData._gbDeeplink.deeplinkId,
+					["interactionId"] = launchData._gbDeeplink.interactionId
+				}
+			end
+
+			completeTask("launchData")
+		end))
 
 		if entry.properties.experimentGroupId == nil then
 			addTask("experimentGroup", Experiments:ListenForPlayerAssignment(player, function (groupId: number?)
