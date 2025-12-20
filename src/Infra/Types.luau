@@ -58,6 +58,10 @@ export type ExperimentGroupMetadata = {
 	groupName: string,
 }
 
-export type Service = ConfigsService | MarkersService | EventsService | JobsService | ExperimentsService
+export type CohortsService = {
+	GetCohortMembershipStatusAsync : (self : CohortsService, cohortName : string, userIds : { number }) -> { [ number ] : boolean }
+}
+
+export type Service = ConfigsService | MarkersService | EventsService | JobsService | ExperimentsService | CohortsService
 
 return true

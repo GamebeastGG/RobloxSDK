@@ -41,7 +41,8 @@ local ENDPOINTS = {
 			["v1/latest/version?platform=roblox"] = "GET",
 			["v1/experiments"] = "GET",
 			["v1/experiments/assignments"] = "POST",
-			["v1/servers/roblox/{serverId}"] = "POST"
+			["v1/servers/roblox/{serverId}"] = "POST",
+			["v1/cohorts/membership"] = "POST"
 		},
 		EndpointTree = {} -- Automatically generated from above
 	}
