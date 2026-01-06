@@ -94,6 +94,33 @@ utilities.tableEqualityCheck = function(a, b)
 	return table.concat(a) == table.concat(b)
 end
 
+-- Deep equality check for two values (handles nested tables)
+function utilities.deepEqual(a: any, b: any): boolean
+	if a == b then
+		return true
+	end
+
+	if typeof(a) ~= typeof(b) or typeof(a) ~= "table" then
+		return false
+	end
+
+	if #a ~= #b then
+		return false
+	end
+
+	for key, aValue in a do
+		local bValue = b[key]
+		if bValue == nil then
+			return false
+		end
+		if not utilities.deepEqual(aValue, bValue) then
+			return false
+		end
+	end
+
+	return true
+end
+
 -- Format time in seconds to specified format
 utilities.formatTime = function(timeRemaining, onlyMinutes)	
 	local hours = math.floor(timeRemaining/60/60)
