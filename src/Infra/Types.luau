@@ -7,6 +7,8 @@ type SDKSettings = {
 	sdkDebugEnabled : boolean,
 	-- Custom URL for the SDK, if any.
 	customUrl : string | nil,
+	-- Environment the SDK is set to.
+	environment : "production" | "studio" | nil
 }
 export type ServerSetupConfig = {
 	key : string | Secret,

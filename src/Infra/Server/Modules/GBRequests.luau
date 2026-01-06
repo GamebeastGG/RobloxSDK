@@ -47,7 +47,10 @@ local ENDPOINTS = {
 		EndpointTree = {} -- Automatically generated from above
 	}
 }
-
+local ENVIRONMENT_MAP = {
+	["production"] = "false",
+	["studio"] = "true"
+}
 --= Object References =--
 
 local FinalRequestSignal = Signal.new()
@@ -130,11 +133,17 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 	args = args or {}
 
 
+	local targetEnvironment = DataCache:Get("Settings").environment
+	local isStudioHeader = tostring(RunService:IsStudio())
+	
+	if targetEnvironment and ENVIRONMENT_MAP[targetEnvironment] then
+		isStudioHeader = ENVIRONMENT_MAP[targetEnvironment]
+	end
+
 	-- Define relevant headers. Backend enforces header presence unless specified.
-	local isStudio = RunService:IsStudio()
 	local headers = {
 		["authorization"] = authKey,
-		["isstudio"] = tostring(isStudio),
+		["isstudio"] = isStudioHeader,
 		["sdkversion"] = MetaData.version,
 		["universeid"] = tostring(game.GameId),
 		["serverid"] = Utilities.getServerId(),
