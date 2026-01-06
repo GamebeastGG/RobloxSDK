@@ -17,7 +17,7 @@ local Types = require(script.Parent.Parent.Parent.Types)
 -- Types
 type ConfigSnapshot = {
 	options: {
-		privacy: {{string}},
+		privacy: { { string } },
 	},
 	variables: {
 		[string]: any,
@@ -32,18 +32,18 @@ type AvailableExperimentGroupSnapshot = {
 }
 type AvailableExperimentsSnapshot = {
 	timestampMs: number,
-	groups: {AvailableExperimentGroupSnapshot},
-	scheduled: {[string]: {number}},
+	groups: { AvailableExperimentGroupSnapshot },
+	scheduled: { [string]: { number } },
 	targetType: "gameserver" | "player" | nil,
-	requiredProperties: {string}?,
+	requiredProperties: { string }?,
 }
 type ExperimentReassignmentPropagationRequest = {
-	playerIds: {string},
-	gameserverIds: {string},
+	playerIds: { string },
+	gameserverIds: { string },
 }
 
 type BaseAssignmentResponse = {
-	groups: {AvailableExperimentGroupSnapshot}?,
+	groups: { AvailableExperimentGroupSnapshot }?,
 }
 type GameserverAssignmentResponse = BaseAssignmentResponse & {
 	targetType: "gameserver",
@@ -51,13 +51,10 @@ type GameserverAssignmentResponse = BaseAssignmentResponse & {
 }
 type PlayerAssignmentResponse = BaseAssignmentResponse & {
 	targetType: "player",
-	playerIdsByGroupId: {[string]: {string}},
+	playerIdsByGroupId: { [string]: { string } },
 }
 type EmptyAssignmentResponse = nil
-type AssignmentResponse =
-	GameserverAssignmentResponse
-	| PlayerAssignmentResponse
-	| EmptyAssignmentResponse
+type AssignmentResponse = GameserverAssignmentResponse | PlayerAssignmentResponse | EmptyAssignmentResponse
 
 --[[
 	How long to wait before requesting bulk assignment after calling `queueAssignment()`.
@@ -93,29 +90,29 @@ local MAX_ASSIGNMENT_METADATA_CALLBACK_DURATION = 6
 	callback yields for longer than `MAX_ASSIGNMENT_METADATA_CALLBACK_DURATION`
 	seconds, the assignment request will proceed without its result.
 ]]
-local PLAYER_PROPERTY_GETTERS: {[string]: (player: Player) -> any} = {
-	inputType = function (player)
+local PLAYER_PROPERTY_GETTERS: { [string]: (player: Player) -> any } = {
+	inputType = function(player)
 		ServerClientInfoHandler:WaitUntilClientInfoResolved(player)
 		return ServerClientInfoHandler:GetClientInfo(player, "inputType")
 	end,
-	device = function (player)
+	device = function(player)
 		ServerClientInfoHandler:WaitUntilClientInfoResolved(player)
 		return ServerClientInfoHandler:GetClientInfo(player, "device")
 	end,
-	deviceSubType = function (player)
+	deviceSubType = function(player)
 		ServerClientInfoHandler:WaitUntilClientInfoResolved(player)
 		return ServerClientInfoHandler:GetClientInfo(player, "deviceSubType")
 	end,
-	country = function (player)
+	country = function(player)
 		return LocalizationCache:GetRegionId(player)
 	end,
-	language = function (player)
+	language = function(player)
 		return LocalizationCache:GetLocaleId(player)
 	end,
-	placeId = function ()
+	placeId = function()
 		return game.PlaceId
 	end,
-	placeVersion = function ()
+	placeVersion = function()
 		return game.PlaceVersion
 	end,
 }
@@ -129,11 +126,11 @@ local PLAYER_PROPERTY_GETTERS: {[string]: (player: Player) -> any} = {
 	callback yields for longer than `MAX_ASSIGNMENT_METADATA_CALLBACK_DURATION`
 	seconds, the assignment request will proceed without its result.
 ]]
-local SERVER_PROPERTY_GETTERS: {[string]: () -> any} = {
-	placeId = function ()
+local SERVER_PROPERTY_GETTERS: { [string]: () -> any } = {
+	placeId = function()
 		return game.PlaceId
 	end,
-	placeVersion = function ()
+	placeVersion = function()
 		return game.PlaceVersion
 	end,
 }
@@ -143,15 +140,17 @@ local SERVER_PROPERTY_GETTERS: {[string]: () -> any} = {
 	and has begun requesting them.
 ]]
 local currentAssignmentState: {
-	playerIdsPendingAssignment: {[number]: true},
+	playerIdsPendingAssignment: { [number]: true },
 	playerJoinListener: RBXScriptConnection,
 	playerLeaveListener: RBXScriptConnection,
 	deferredBulkAssignmentThread: thread?,
-	activeGroupStateById: {[number]: {
-		group: AvailableExperimentGroupSnapshot,
-		playerSet: {[Player]: true},
-		experimentEndTimer: thread?,
-	}},
+	activeGroupStateById: {
+		[number]: {
+			group: AvailableExperimentGroupSnapshot,
+			playerSet: { [Player]: true },
+			experimentEndTimer: thread?,
+		},
+	},
 
 	--[[
 		State for groups we know are active, but haven't received yet from snapshots or
@@ -163,13 +162,15 @@ local currentAssignmentState: {
 		Once a group is received, or if it ends before being received, it is removed
 		from this map when `clearUnfetchedActiveGroupState()` is called.
 	]]
-	unfetchedActiveGroupStateById: {[number]: {
-		endTime: number?,
-		experimentEndTimer: thread?,
-		onFetched: Signal.Signal,
-	}},
-
-}? = nil
+	unfetchedActiveGroupStateById: {
+		[number]: {
+			endTime: number?,
+			experimentEndTimer: thread?,
+			onFetched: Signal.Signal,
+		},
+	},
+}? =
+	nil
 
 local lastAvailableExperimentsSnapshot = nil :: AvailableExperimentsSnapshot?
 
@@ -179,7 +180,7 @@ local lastAvailableExperimentsSnapshot = nil :: AvailableExperimentsSnapshot?
 
 	These are created and terminated early based on received snapshots.
 ]]
-local assignmentWakeUpTimersByFutureGroupId = {} :: {[number]: thread}
+local assignmentWakeUpTimersByFutureGroupId = {} :: { [number]: thread }
 
 --[[
 	Thread for deferring proactively fetching the latest available experiments
@@ -188,12 +189,12 @@ local assignmentWakeUpTimersByFutureGroupId = {} :: {[number]: thread}
 local deferredSnapshotFetchTimerThread = nil :: thread?
 
 Experiments.AssignedServerGroupId = nil :: number?
-Experiments.AssignedGroupIdByPlayer = {} :: {[Player]: number?}
+Experiments.AssignedGroupIdByPlayer = {} :: { [Player]: number? }
 Experiments.OnServerGroupIdChanged = Signal.new()
 Experiments.OnPlayerGroupIdChanged = Signal.new()
 
 Experiments.AssignedServerConfig = nil :: ConfigSnapshot?
-Experiments.AssignedConfigByPlayer = {} :: {[Player]: ConfigSnapshot}
+Experiments.AssignedConfigByPlayer = {} :: { [Player]: ConfigSnapshot }
 Experiments.OnAssignedServerConfigChanged = Signal.new()
 Experiments.OnAssignedPlayerConfigChanged = Signal.new()
 
@@ -219,7 +220,10 @@ function Experiments:UpdateStateFromAvailableExperiments(
 	end
 
 	-- Ignore older snapshots (e.g. from old config change jobs, which take longer to propagate to gameservers)
-	if lastAvailableExperimentsSnapshot and (lastAvailableExperimentsSnapshot.timestampMs >= availableExperimentsSnapshot.timestampMs) then
+	if
+		lastAvailableExperimentsSnapshot
+		and (lastAvailableExperimentsSnapshot.timestampMs >= availableExperimentsSnapshot.timestampMs)
+	then
 		return
 	end
 	lastAvailableExperimentsSnapshot = availableExperimentsSnapshot
@@ -235,9 +239,8 @@ function Experiments:UpdateStateFromAvailableExperiments(
 
 	-- If assignment is enabled, apply changes from the snapshot to its state
 	if currentAssignmentState then
-
 		-- Cache received experiment group configs
-		local snapshotGroupIdSet = {} :: {[number]: true}
+		local snapshotGroupIdSet = {} :: { [number]: true }
 		local didReceiveNewGroup = false
 		for _, group in availableGroups do
 			snapshotGroupIdSet[group.id] = true
@@ -262,7 +265,7 @@ function Experiments:UpdateStateFromAvailableExperiments(
 			end
 
 			-- Clear local assignments for experiments that have been terminated
-			local terminatedGroupIds: {number} = {}
+			local terminatedGroupIds: { number } = {}
 			if Experiments.AssignedServerGroupId and not snapshotGroupIdSet[Experiments.AssignedServerGroupId] then
 				table.insert(terminatedGroupIds, Experiments.AssignedServerGroupId)
 			end
@@ -297,8 +300,15 @@ function Experiments:UpdateStateFromAvailableExperiments(
 		local endTimeMs = timestamps[2] :: number?
 
 		local secondsUntilStart = math.max(0, startTimeMs - DateTime.now().UnixTimestampMillis) / 1000
-		Utilities.GBLog("Scheduling future experiment group wake-up timer:", groupId, startTimeMs, "in", secondsUntilStart, "sec")
-		assignmentWakeUpTimersByFutureGroupId[groupId] = task.delay(secondsUntilStart, function ()
+		Utilities.GBLog(
+			"Scheduling future experiment group wake-up timer:",
+			groupId,
+			startTimeMs,
+			"in",
+			secondsUntilStart,
+			"sec"
+		)
+		assignmentWakeUpTimersByFutureGroupId[groupId] = task.delay(secondsUntilStart, function()
 			assignmentWakeUpTimersByFutureGroupId[groupId] = nil
 			if currentAssignmentState then
 				initializeUnfetchedActiveGroupState(groupId, endTimeMs)
@@ -375,23 +385,23 @@ function Experiments:ListenForPlayerAssignment(player: Player, callback: (groupI
 	end
 
 	-- Wait for assignment to change for player or server, or for it to be disabled
-	listenerCleaner:Add(Experiments.OnPlayerGroupIdChanged:Connect(function (changedPlayer: Player, newGroupId: number?)
+	listenerCleaner:Add(Experiments.OnPlayerGroupIdChanged:Connect(function(changedPlayer: Player, newGroupId: number?)
 		if (changedPlayer == player) and newGroupId then
 			resolve(newGroupId)
 		end
 	end))
 
-	listenerCleaner:Add(Experiments.OnServerGroupIdChanged:Connect(function (newGroupId: number?)
+	listenerCleaner:Add(Experiments.OnServerGroupIdChanged:Connect(function(newGroupId: number?)
 		if newGroupId then
 			resolve(newGroupId)
 		end
 	end))
 
-	listenerCleaner:Add(Experiments.OnAssignmentDisabling:Connect(function ()
+	listenerCleaner:Add(Experiments.OnAssignmentDisabling:Connect(function()
 		resolve(nil)
 	end))
 
-	listenerCleaner:Add(Players.PlayerRemoving:Connect(function (leavingPlayer: Player)
+	listenerCleaner:Add(Players.PlayerRemoving:Connect(function(leavingPlayer: Player)
 		if leavingPlayer == player then
 			resolve(nil)
 		end
@@ -434,13 +444,13 @@ function enableAssignment()
 	-- Start assignment & initialize state
 	currentAssignmentState = {
 		playerIdsPendingAssignment = {},
-		playerJoinListener = Players.PlayerAdded:Connect(function (player)
+		playerJoinListener = Players.PlayerAdded:Connect(function(player)
 			if not Experiments.AssignedServerGroupId then
 				queueAssignment({ player })
 			end
 		end),
-		playerLeaveListener = Players.PlayerRemoving:Connect(function (player)
-			task.defer(function ()
+		playerLeaveListener = Players.PlayerRemoving:Connect(function(player)
+			task.defer(function()
 				setAssignedPlayerGroupId(player, nil)
 			end)
 		end),
@@ -450,7 +460,7 @@ function enableAssignment()
 	}
 
 	Utilities.GBLog("Started requesting experiment assignment")
-	
+
 	-- Request initial assignment
 	Utilities.GBLog("Queuing initial assignment...")
 	queueAssignment(Players:GetPlayers())
@@ -498,7 +508,7 @@ end
 --[[
 	Queues players to be assigned to experiments in bulk.
 ]]
-function queueAssignment(players: {Player})
+function queueAssignment(players: { Player })
 	assert(currentAssignmentState, "Assignment has not been started")
 
 	for _, player in players do
@@ -507,7 +517,7 @@ function queueAssignment(players: {Player})
 
 	-- Start timer for deferred bulk assignment
 	if not currentAssignmentState.deferredBulkAssignmentThread then
-		currentAssignmentState.deferredBulkAssignmentThread = task.delay(BULK_ASSIGNMENT_SECONDS_TO_DEFER, function ()
+		currentAssignmentState.deferredBulkAssignmentThread = task.delay(BULK_ASSIGNMENT_SECONDS_TO_DEFER, function()
 			currentAssignmentState.deferredBulkAssignmentThread = nil
 			executeAssignmentRequest()
 		end)
@@ -528,31 +538,31 @@ function executeAssignmentRequest()
 	end
 
 	-- Consume queue of players pending assignment
-	local playerIds: {number} = {}
+	local playerIds: { number } = {}
 	for playerId in assignmentState.playerIdsPendingAssignment do
 		table.insert(playerIds, playerId)
 	end
 	assignmentState.playerIdsPendingAssignment = {}
 
 	-- Build list of known groups that backend shouldn't include in response
-	local knownGroupIds: {number} = {}
+	local knownGroupIds: { number } = {}
 	for groupId in assignmentState.activeGroupStateById do
 		table.insert(knownGroupIds, groupId)
 	end
 
 	-- If there are unfetched groups, wait up to max delay for them to be fetched
 	-- (these may introduce new metadata required for assignment, which is retrieved next)
-	local pendingUnfetchedGroupCallbacks: {() -> ()} = {}
+	local pendingUnfetchedGroupCallbacks: { () -> () } = {}
 	for _, unfetchedGroupState in assignmentState.unfetchedActiveGroupStateById do
-		table.insert(pendingUnfetchedGroupCallbacks, function ()
+		table.insert(pendingUnfetchedGroupCallbacks, function()
 			unfetchedGroupState.onFetched:Wait()
 		end)
 	end
 	Utilities.waitForAnyCall({
-		function ()
+		function()
 			Utilities.waitForAllCalls(pendingUnfetchedGroupCallbacks)
 		end,
-		function ()
+		function()
 			task.wait(MAX_ASSIGNMENT_EXPERIMENTS_FETCH_DELAY)
 		end,
 	})
@@ -561,7 +571,8 @@ function executeAssignmentRequest()
 	end
 
 	-- Retrieve metadata needed for assignment
-	local serverProperties, playerPropertiesByIdString = getMetadataForAssignment(playerIds, MAX_ASSIGNMENT_METADATA_CALLBACK_DURATION)
+	local serverProperties, playerPropertiesByIdString =
+		getMetadataForAssignment(playerIds, MAX_ASSIGNMENT_METADATA_CALLBACK_DURATION)
 	if currentAssignmentState ~= assignmentState then
 		return
 	end
@@ -583,7 +594,7 @@ function executeAssignmentRequest()
 	if not didSucceed then
 		Utilities.GBWarn("Failed to get experiment assignment:", response)
 
-		local players: {Player} = {}
+		local players: { Player } = {}
 		for _, playerId in playerIds do
 			local player = Players:GetPlayerByUserId(playerId)
 			if player then
@@ -617,9 +628,8 @@ function executeAssignmentRequest()
 		for player in Experiments.AssignedGroupIdByPlayer do
 			setAssignedPlayerGroupId(player, nil)
 		end
-
 	elseif assignmentResponse.targetType == "player" then
-		local assignedPlayerIdSet: {[number]: true} = {}
+		local assignedPlayerIdSet: { [number]: true } = {}
 		for groupIdString, groupPlayerIds in assignmentResponse.playerIdsByGroupId do
 			local groupId = tonumber(groupIdString) :: number
 			for _, playerIdString in groupPlayerIds do
@@ -651,13 +661,20 @@ end
 
 function setAssignedPlayerGroupId(player: Player, groupId: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
-	assert(groupId == nil or currentAssignmentState.activeGroupStateById[groupId], "Experiment group state has not been initialized")
+	assert(
+		groupId == nil or currentAssignmentState.activeGroupStateById[groupId],
+		"Experiment group state has not been initialized"
+	)
 
 	Utilities.GBLog("Setting assigned experiment group ID for player:", player.UserId, groupId)
 
 	local previousGroupId = Experiments.AssignedGroupIdByPlayer[player]
 	if previousGroupId == groupId then
-		Utilities.GBLog("Skipping setting assigned experiment group ID for player:", player.UserId, `(unchanged {groupId} -> {previousGroupId})`)
+		Utilities.GBLog(
+			"Skipping setting assigned experiment group ID for player:",
+			player.UserId,
+			`(unchanged {groupId} -> {previousGroupId})`
+		)
 		return
 	end
 
@@ -686,7 +703,10 @@ end
 
 function setAssignedServerGroupId(groupId: number?)
 	assert(currentAssignmentState, "Assignment has not been started")
-	assert(groupId == nil or currentAssignmentState.activeGroupStateById[groupId], "Experiment group state has not been initialized")
+	assert(
+		groupId == nil or currentAssignmentState.activeGroupStateById[groupId],
+		"Experiment group state has not been initialized"
+	)
 
 	local previousGroupId = Experiments.AssignedServerGroupId
 	if previousGroupId == groupId then
@@ -700,19 +720,18 @@ function setAssignedServerGroupId(groupId: number?)
 		local groupState = currentAssignmentState.activeGroupStateById[groupId]
 		Experiments.AssignedServerConfig = groupState.group.configs
 		Experiments.OnAssignedServerConfigChanged:Fire(groupState.group.configs)
-
 	else
 		Experiments.AssignedServerConfig = nil
 		Experiments.OnAssignedServerConfigChanged:Fire(nil)
 	end
 end
 
-function getDoAvailableExperimentsRemain(excludedGroupIdList: {number}?): boolean
+function getDoAvailableExperimentsRemain(excludedGroupIdList: { number }?): boolean
 	if not currentAssignmentState then
 		return false
 	end
 
-	local excludedGroupIdSet = {} :: {[number]: true?}
+	local excludedGroupIdSet = {} :: { [number]: true? }
 	if excludedGroupIdList then
 		for _, groupId in excludedGroupIdList do
 			excludedGroupIdSet[groupId] = true
@@ -752,10 +771,10 @@ end
 	Queues reassignment for members of the given terminated groups,
 	if any available experiments remain.
 ]]
-function reassignTerminatedGroupMembers(terminatedGroupIds: {number})
+function reassignTerminatedGroupMembers(terminatedGroupIds: { number })
 	assert(currentAssignmentState, "Assignment has not been started")
 
-	local unassignedPlayers: {Player} = {}
+	local unassignedPlayers: { Player } = {}
 	local didUnassignServer = false
 
 	-- Identify members in need of reassignment
@@ -763,7 +782,11 @@ function reassignTerminatedGroupMembers(terminatedGroupIds: {number})
 		local groupState = currentAssignmentState.activeGroupStateById[groupId]
 		if groupState then
 			for player in groupState.playerSet do
-				Utilities.GBLog("Queuing reassignment for player from terminated experiment group:", groupId, player.Name)
+				Utilities.GBLog(
+					"Queuing reassignment for player from terminated experiment group:",
+					groupId,
+					player.Name
+				)
 				table.insert(unassignedPlayers, player)
 			end
 		end
@@ -813,7 +836,7 @@ function initializeActiveGroupState(groupSnapshot: AvailableExperimentGroupSnaps
 		local newConfigs = groupSnapshot.configs
 
 		-- Simple check: compare serialized configs (handles nested tables)
-		local configsChanged = not Utilities.deepEqual(oldConfigs, newConfigs)
+		local configsChanged = not Utilities.primativeDeepEqual(oldConfigs, newConfigs)
 
 		if configsChanged then
 			Utilities.GBLog("Updating cached configs for experiment group:", groupSnapshot.id)
@@ -849,7 +872,7 @@ function initializeActiveGroupState(groupSnapshot: AvailableExperimentGroupSnaps
 	if groupSnapshot.endsAt then
 		local secondsUntilEnd = math.max(0, groupSnapshot.endsAt - DateTime.now().UnixTimestampMillis) / 1000
 		local groupState = currentAssignmentState.activeGroupStateById[groupSnapshot.id]
-		groupState.experimentEndTimer = task.delay(secondsUntilEnd + POST_EXPERIMENT_END_REASSIGNMENT_DELAY, function ()
+		groupState.experimentEndTimer = task.delay(secondsUntilEnd + POST_EXPERIMENT_END_REASSIGNMENT_DELAY, function()
 			groupState.experimentEndTimer = nil
 			Utilities.GBLog("Group", groupSnapshot.id, "experiment ended, reassigning members & clearing...")
 			reassignTerminatedGroupMembers({ groupSnapshot.id })
@@ -887,8 +910,14 @@ function clearActiveGroupState(groupId: number, didQueueMemberReassignment: bool
 
 	-- Ensure members have been reassigned beforehand
 	if not didQueueMemberReassignment then
-		assert(next(groupState.playerSet) == nil, "Cannot clear active experiment group state while players are assigned to it")
-		assert(Experiments.AssignedServerGroupId ~= groupId, "Cannot clear active experiment group state while server is assigned to it")
+		assert(
+			next(groupState.playerSet) == nil,
+			"Cannot clear active experiment group state while players are assigned to it"
+		)
+		assert(
+			Experiments.AssignedServerGroupId ~= groupId,
+			"Cannot clear active experiment group state while server is assigned to it"
+		)
 	end
 
 	if groupState.experimentEndTimer then
@@ -929,7 +958,7 @@ function initializeUnfetchedActiveGroupState(groupId: number, endTime: number?)
 	if endTime then
 		local secondsUntilEnd = math.max(0, endTime - DateTime.now().UnixTimestampMillis) / 1000
 		local unfetchedGroupState = currentAssignmentState.unfetchedActiveGroupStateById[groupId]
-		unfetchedGroupState.experimentEndTimer = task.delay(secondsUntilEnd, function ()
+		unfetchedGroupState.experimentEndTimer = task.delay(secondsUntilEnd, function()
 			unfetchedGroupState.experimentEndTimer = nil
 			Utilities.GBLog("Unfetched group", groupId, "experiment ended, clearing")
 			clearUnfetchedActiveGroupState(groupId)
@@ -988,7 +1017,7 @@ function queueAssignmentForNonAssignedPlayers()
 		return
 	end
 
-	local nonAssignedPlayers: {Player} = {}
+	local nonAssignedPlayers: { Player } = {}
 	for _, player in Players:GetPlayers() do
 		if not Experiments.AssignedGroupIdByPlayer[player] then
 			table.insert(nonAssignedPlayers, player)
@@ -996,7 +1025,10 @@ function queueAssignmentForNonAssignedPlayers()
 	end
 
 	if #nonAssignedPlayers > 0 then
-		Utilities.GBLog("New experiment groups available, queueing assignment for non-assigned players", nonAssignedPlayers)
+		Utilities.GBLog(
+			"New experiment groups available, queueing assignment for non-assigned players",
+			nonAssignedPlayers
+		)
 		queueAssignment(nonAssignedPlayers)
 	end
 end
@@ -1017,7 +1049,7 @@ function queueAvailableExperimentsSnapshotUpdate()
 		return
 	end
 
-	deferredSnapshotFetchTimerThread = task.delay(1, function ()
+	deferredSnapshotFetchTimerThread = task.delay(1, function()
 		deferredSnapshotFetchTimerThread = nil
 
 		local didSucceed, response = GBRequests:GBRequestAsync("v1/experiments")
@@ -1037,27 +1069,29 @@ end
 
 	@canyield
 ]]
-function getMetadataForAssignment(playerIds: {number}?, timeout: number?): ({[string]: any}?, {[string]: {[string]: any}}?)
+function getMetadataForAssignment(
+	playerIds: { number }?,
+	timeout: number?
+): ({ [string]: any }?, { [string]: { [string]: any } }?)
 	local snapshot = lastAvailableExperimentsSnapshot
 	if not (snapshot and snapshot.targetType and snapshot.requiredProperties) then
 		return nil, nil
 	end
 
-	local serverProperties: {[string]: any} = {}
-	local playerPropertiesByIdString: {[string]: {[string]: any}} = {}
+	local serverProperties: { [string]: any } = {}
+	local playerPropertiesByIdString: { [string]: { [string]: any } } = {}
 
-	local metadataRetrievalCallbacks: {() -> ()} = {}
+	local metadataRetrievalCallbacks: { () -> () } = {}
 
 	if snapshot.targetType == "gameserver" then
 		for _, property in snapshot.requiredProperties do
 			if not SERVER_PROPERTY_GETTERS[property] then
 				continue
 			end
-			table.insert(metadataRetrievalCallbacks, function ()
+			table.insert(metadataRetrievalCallbacks, function()
 				serverProperties[property] = SERVER_PROPERTY_GETTERS[property]()
 			end)
 		end
-
 	elseif snapshot.targetType == "player" and playerIds then
 		for _, playerId in playerIds do
 			local player = Players:GetPlayerByUserId(playerId)
@@ -1072,7 +1106,7 @@ function getMetadataForAssignment(playerIds: {number}?, timeout: number?): ({[st
 			-- Call each property getter in parallel to populate player metadata
 			for _, property in snapshot.requiredProperties do
 				if PLAYER_PROPERTY_GETTERS[property] then
-					table.insert(metadataRetrievalCallbacks, function ()
+					table.insert(metadataRetrievalCallbacks, function()
 						playerProperties[property] = PLAYER_PROPERTY_GETTERS[property](player)
 					end)
 				end
@@ -1083,10 +1117,10 @@ function getMetadataForAssignment(playerIds: {number}?, timeout: number?): ({[st
 	-- Yield until all population callbacks finish, or max duration is reached
 	if timeout then
 		Utilities.waitForAnyCall({
-			function ()
+			function()
 				Utilities.waitForAllCalls(metadataRetrievalCallbacks)
 			end,
-			function ()
+			function()
 				task.wait(timeout)
 			end,
 		})
