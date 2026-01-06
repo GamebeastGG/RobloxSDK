@@ -792,22 +792,54 @@ function reassignTerminatedGroupMembers(terminatedGroupIds: {number})
 end
 
 --[[
-	Initializes state for the given active experiment group.
+	Initializes or updates state for the given active experiment group.
 
 	This sets up tracking for when the group should become inactive
 	and be cleaned up.
+
+	If the group already exists, this updates the cached configs and
+	re-applies them to any assigned members.
 
 	Returns whether this was a new group, or if it was already initialized.
 ]]
 function initializeActiveGroupState(groupSnapshot: AvailableExperimentGroupSnapshot): boolean
 	assert(currentAssignmentState, "Assignment has not been started")
 
-	-- Only initialize group state once
-	if currentAssignmentState.activeGroupStateById[groupSnapshot.id] then
+	-- If group already exists, update its cached configs
+	local existingGroupState = currentAssignmentState.activeGroupStateById[groupSnapshot.id]
+	if existingGroupState then
+		-- Check if configs have changed
+		local oldConfigs = existingGroupState.group.configs
+		local newConfigs = groupSnapshot.configs
+
+		-- Simple check: compare serialized configs (handles nested tables)
+		local configsChanged = not Utilities.deepEqual(oldConfigs, newConfigs)
+
+		if configsChanged then
+			Utilities.GBLog("Updating cached configs for experiment group:", groupSnapshot.id)
+
+			-- Update the cached group snapshot with new configs
+			existingGroupState.group = groupSnapshot
+
+			-- Re-apply configs to assigned server if this group is assigned to it
+			if Experiments.AssignedServerGroupId == groupSnapshot.id then
+				Utilities.GBLog("Re-applying updated configs to assigned server")
+				Experiments.AssignedServerConfig = newConfigs
+				Experiments.OnAssignedServerConfigChanged:Fire(newConfigs)
+			end
+
+			-- Re-apply configs to assigned players in this group
+			for player in existingGroupState.playerSet do
+				Utilities.GBLog("Re-applying updated configs to assigned player:", player.Name)
+				Experiments.AssignedConfigByPlayer[player] = newConfigs
+				Experiments.OnAssignedPlayerConfigChanged:Fire(player, newConfigs)
+			end
+		end
+
 		return false
 	end
 
-	-- Initialize group state
+	-- Initialize group state for new groups
 	currentAssignmentState.activeGroupStateById[groupSnapshot.id] = {
 		group = groupSnapshot,
 		playerSet = {},
