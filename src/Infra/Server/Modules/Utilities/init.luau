@@ -100,11 +100,25 @@ function utilities.deepEqual(a: any, b: any): boolean
 		return true
 	end
 
-	if typeof(a) ~= typeof(b) or typeof(a) ~= "table" then
+	if typeof(a) ~= typeof(b) then
 		return false
 	end
 
-	if #a ~= #b then
+	if typeof(a) ~= "table" then
+		return false
+	end
+
+	local aCount = 0
+	for _ in a do
+		aCount += 1
+	end
+
+	local bCount = 0
+	for _ in b do
+		bCount += 1
+	end
+
+	if aCount ~= bCount then
 		return false
 	end
 
