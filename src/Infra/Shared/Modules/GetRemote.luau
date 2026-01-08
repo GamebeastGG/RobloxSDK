@@ -17,9 +17,28 @@ local RunService = game:GetService("RunService")
 
 --= Types =--
 
+--= Internal Functions =--
+
+--Some experiences have long load times, to silence the warning we wait for 30 seconds before warning about infinite yield.
+local function WaitForRemoteFolder()
+    local didWarn = false
+    repeat
+        local remoteFolder = script:WaitForChild("Remotes", 30)
+        if remoteFolder then
+            return remoteFolder
+        end
+
+        if not didWarn then
+            warn("[Gamebeast] Remote folder not found after 30 seconds, infinite yield is possible.")
+            didWarn = true
+        end
+    until remoteFolder ~= nil
+end
+
+
 --= Object References =--
 
-local RemotesFolder = RunService:IsClient() and script:WaitForChild("Remotes") or Instance.new("Folder", script)
+local RemotesFolder = RunService:IsClient() and WaitForRemoteFolder() or Instance.new("Folder", script)
 RemotesFolder.Name = "Remotes"
 
 --= Constants =--
@@ -30,7 +49,6 @@ local IS_SERVER = RunService:IsServer()
 
 --= Public Variables =--
 
---= Internal Functions =--
 
 --= API Functions =--
 

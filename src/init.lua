@@ -32,6 +32,7 @@ export type MarkersService = Types.MarkersService
 export type JobsService = Types.JobsService
 export type EventsService = Types.EventsService
 export type ExperimentsService = Types.ExperimentsService
+export type CohortsService = Types.CohortsService
 
 type ModuleData = {
 	Name : string,
@@ -48,12 +49,37 @@ type PublicModuleData = {
 --= Constants =--
 
 local DEFAULT_SETTINGS = {
-	sdkWarningsEnabled = true,
-	includeWarningStackTrace = false,
-	sdkDebugEnabled = false,
-	customUrl = nil, -- Custom domain for the SDK, if any
+	sdkWarningsEnabled = {
+		value = true,
+		validator = function(val)
+			return type(val) == "boolean"
+		end
+	},
+	includeWarningStackTrace = {
+		value = false,
+		validator = function(val)
+			return type(val) == "boolean"
+		end
+	},
+	sdkDebugEnabled = {
+		value = false,
+		validator = function(val)
+			return type(val) == "boolean"
+		end
+	},
+	customUrl = {
+		value = nil,
+		validator = function(val)
+			return type(val) == "string" or val == nil
+		end
+	},
+	environment = {
+		value = nil,
+		validator = function(val)
+			return val == "production" or val == "studio" or val == nil
+		end
+	},
 }
-
 --= Object References =--
 
 --= Variables =--
@@ -163,7 +189,12 @@ local function StartSDK()
 
 	local dataCacheModule = RequireModule(GetModule("DataCache"))
 	--NOTE: All modules that use settings should await them if they are needed during init.
-	dataCacheModule:Set("Settings", table.clone(DEFAULT_SETTINGS))
+	local defaultSettings = {}
+	for key, settingData in DEFAULT_SETTINGS do
+		defaultSettings[key] = settingData.value
+	end
+
+	dataCacheModule:Set("Settings", defaultSettings)
 
 	-- Require all modules
 	for _, moduleData in (Modules) do
@@ -224,9 +255,13 @@ function Gamebeast:Setup(setupConfig : ServerSetupConfig?)
 
 	local sdkSettings = setupConfig.sdkSettings or {}
 
-	for key, value in DEFAULT_SETTINGS do
+	for key, settingData in DEFAULT_SETTINGS do
 		if sdkSettings[key] == nil then
-			sdkSettings[key] = value
+			sdkSettings[key] = settingData.value
+		end
+		
+		if settingData.validator(sdkSettings[key]) == false then 
+			error(`The value of the Gamebeast SDK setting "{key}" is invalid.`, 2)
 		end
 	end
 
