@@ -19,18 +19,20 @@
 local Updater = { }
 
 --= Roblox Services =--
+local Players = game:GetService("Players")
 
 local RunService = game:GetService("RunService")
+local MessagingService = game:GetService("MessagingService")
 
 --= Dependencies =--
 
+local Signal = shared.GBMod("Signal")
+local MetaData = shared.GBMod("MetaData") ---@module MetaData
+local Utilities = shared.GBMod("Utilities")
 local GBRequests = shared.GBMod("GBRequests")
 local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
-local Utilities = shared.GBMod("Utilities")
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
-local Signal = shared.GBMod("Signal")
 local DatatstoreBackup = shared.GBMod("DatastoreBackup") ---@module DatastoreBackup
-local MetaData = shared.GBMod("MetaData") ---@module MetaData
 
 --= Types =--
 
@@ -69,15 +71,6 @@ function Updater:UpdateConfigs(newConfigs, init)
 	-- If we got an old configuration version over the wire for some reason, don't apply it
 	if lastVersion and newConfigs["GBConfigs"]["GBPublishTime"] <= lastVersion then
 		return
-	end
-
-	--print("Loading new configs from Gamebeast")
-	-- Save newly received configs to datastore for backup purposes. Only the host server needs to do this for resource considerations.
-	-- Make sure we're not initializing and saving an already backed up config.
-	if shared.GBMod("HostServer"):IsHostServer() and not init then
-		task.spawn(function()
-			self:SaveConfigsToBackup(newConfigs)
-		end)
 	end
 
 	InternalConfigs:ApplyInternalConfigs(newConfigs["GBConfigs"])
@@ -181,7 +174,7 @@ function Updater:Init()
 	-- Start up, ask for most recent configuations
 
 	local function fetchConfigs()
-		local success, newConfigsResp = GBRequests:GBRequestAsync("v1/configurations", nil, 1)
+		local success, newConfigsResp = GBRequests:GBRequestAsync("v1/configurations", nil)
 		if success then
 			return newConfigsResp.args
 		else
@@ -235,6 +228,34 @@ function Updater:Init()
 				InternalConfigs:ApplyConfigs(player, nil, nil)
 			end
 		end
+	end)
+
+	--Patch: Listen for propagation messages to trigger config and experiment refetch.
+	task.spawn(function()
+		Utilities.promiseReturn(1, function()
+			MessagingService:SubscribeAsync("GB_PROPAGATE", function(message)
+				if not message.Data or message.Data.fromServer == game.JobId then
+					return
+				end
+
+				if message.Data.requestType == "Kick" then
+					-- Don't need to refetch configs for kick requests
+					local player = Players:GetPlayerByUserId(message.Data.args.playerId)
+					if player then
+						player:Kick(message.Data.args.reason)
+					end
+					return
+				else
+					local newConfigs = fetchConfigs()
+					if not newConfigs then
+						Utilities.GBWarn("Failed to fetch configs after receiving propagation message. Will retry when next propagation message is received.")
+						return
+					end
+				end
+
+				self:UpdateConfigs(newConfigs)
+			end)
+		end)
 	end)
 end
 
