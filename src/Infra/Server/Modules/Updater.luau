@@ -51,6 +51,9 @@ local MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME = 10
 
 --= Object References =--
 
+local PrimaryBackup = DatatstoreBackup.new(RunService:IsStudio())
+local ProdBackup = DatatstoreBackup.new(false)
+
 --= Variables =--
 
 --= Public Variables =--
@@ -135,7 +138,7 @@ end
 
 -- In the unlikely case GB is down, fall back on Roblox datastores
 function Updater:GetBackupConfigs()
-	local success, configs = DatatstoreBackup:Get("Configs")
+	local success, configs = PrimaryBackup:Get("Configs")
 	
 	if not success then
 		Utilities.GBWarn("Couldn't get configs from backup. Attempting to re-establish connection with Gamebeast...")
@@ -155,7 +158,7 @@ function Updater:SaveConfigsToBackup(newConfigs)
 	local newBackupConfigs = Utilities.recursiveCopy(newConfigs)
 	newBackupConfigs.GBConfigs.Experiments = nil
 
-	DatatstoreBackup:Set("Configs", newBackupConfigs)
+	ProdBackup:Set("Configs", newBackupConfigs)
 end
 
 
@@ -174,8 +177,11 @@ function Updater:Init()
 
 	-- Start up, ask for most recent configuations
 
-	local function fetchConfigs()
-		local success, newConfigsResp = GBRequests:GBRequestAsync("v1/configurations", nil)
+	local function fetchConfigs(studioHeaderOverride)
+		local headers = {
+			["isstudio"] = if studioHeaderOverride then studioHeaderOverride else nil
+		}
+		local success, newConfigsResp = GBRequests:GBRequestAsync("v1/configurations", nil, headers)
 		if success then
 			return newConfigsResp.args
 		else
@@ -228,6 +234,23 @@ function Updater:Init()
 			else
 				InternalConfigs:ApplyConfigs(player, nil, nil)
 			end
+		end
+	end)
+
+	-- Save prod backup when in studio
+	task.spawn(function()
+		local prodConfigs = fetchConfigs("false")
+		if prodConfigs then
+			local success, err = pcall(function()
+				ProdBackup:Set("Configs", prodConfigs)
+			end)
+			
+			if not success then
+				Utilities.GBWarn("Failed to save production backup configs: " .. tostring(err))
+				return
+			end
+
+			Utilities.GBLog("Successfully saved production backup configs in studio environment.")
 		end
 	end)
 
