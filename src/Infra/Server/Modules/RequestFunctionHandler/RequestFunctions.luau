@@ -102,32 +102,18 @@ requestFunctions.funcs = {
 	["Kick"] = function(args)
 		local userIdentifier = args.playerId
 		-- We support UserIds + usernames from the dashboard
-		local function doKick(player, reason)
-			Propagate("Kick", {playerId = player.UserId, reason = reason})
+
+		local player = Utilities:FindPlayer(userIdentifier)
+		if not player then
+			Propagate("Kick", {playerId = userIdentifier, reason = args.reason})
+			return
 		end
+		
+		local filteredReason = Utilities.promiseReturn(1, function()
+			return ChatService:FilterStringForBroadcast(args.reason, player)
+		end)
 
-		if tonumber(userIdentifier) then
-			--
-			for _, player in Players:GetPlayers() do
-				if player.UserId == tonumber(userIdentifier) then
-					local filteredReason = Utilities.promiseReturn(1, function()
-						return ChatService:FilterStringForBroadcast(args.reason, player)
-					end)
-
-					doKick(player, filteredReason)
-				end
-			end
-		else
-			local player = Players:FindFirstChild(userIdentifier)
-
-			if player then
-				local filteredReason = Utilities.promiseReturn(1, function()
-					return ChatService:FilterStringForBroadcast(args.reason, player)
-				end)
-				
-				doKick(player, filteredReason)
-			end
-		end
+		player:Kick(filteredReason)
 	end;
 	
 	-- host_only: false

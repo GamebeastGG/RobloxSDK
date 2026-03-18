@@ -22,6 +22,7 @@ local Updater = { }
 local Players = game:GetService("Players")
 
 local RunService = game:GetService("RunService")
+local ChatService = game:GetService("Chat")
 local MessagingService = game:GetService("MessagingService")
 
 --= Dependencies =--
@@ -240,20 +241,27 @@ function Updater:Init()
 
 				if message.Data.requestType == "Kick" then
 					-- Don't need to refetch configs for kick requests
-					local player = Players:GetPlayerByUserId(message.Data.args.playerId)
-					if player then
-						player:Kick(message.Data.args.reason)
+					-- Temp redundant logic
+					local player = Utilities:FindPlayer(message.Data.args.playerId)
+					if not player then
+						return
 					end
-					return
+					
+					local filteredReason = Utilities.promiseReturn(1, function()
+						return ChatService:FilterStringForBroadcast(message.Data.args.reason, player)
+					end)
+
+					player:Kick(filteredReason)
 				else
 					local newConfigs = fetchConfigs()
 					if not newConfigs then
 						Utilities.GBWarn("Failed to fetch configs after receiving propagation message. Will retry when next propagation message is received.")
 						return
 					end
+
+					self:UpdateConfigs(newConfigs)
 				end
 
-				self:UpdateConfigs(newConfigs)
 			end)
 		end)
 	end)
