@@ -70,7 +70,7 @@ function Updater:UpdateConfigs(newConfigs, init)
 	local lastVersion = not init and currentGBConfigs["GBPublishTime"] or nil
 	
 	-- If we got an old configuration version over the wire for some reason, don't apply it
-	if lastVersion and newConfigs["GBConfigs"]["GBPublishTime"] <= lastVersion then
+	if lastVersion and newConfigs["GBConfigs"]["GBPublishTime"] < lastVersion then
 		return
 	end
 
