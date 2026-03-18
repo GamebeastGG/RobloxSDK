@@ -177,11 +177,8 @@ function Updater:Init()
 
 	-- Start up, ask for most recent configuations
 
-	local function fetchConfigs(studioHeaderOverride)
-		local headers = {
-			["isstudio"] = if studioHeaderOverride then studioHeaderOverride else nil
-		}
-		local success, newConfigsResp = GBRequests:GBRequestAsync("v1/configurations", nil, headers)
+	local function fetchConfigs()
+		local success, newConfigsResp = GBRequests:GBRequestAsync("v1/configurations", nil)
 		if success then
 			return newConfigsResp.args
 		else
@@ -234,23 +231,6 @@ function Updater:Init()
 			else
 				InternalConfigs:ApplyConfigs(player, nil, nil)
 			end
-		end
-	end)
-
-	-- Save prod backup when in studio
-	task.spawn(function()
-		local prodConfigs = fetchConfigs("false")
-		if prodConfigs then
-			local success, err = pcall(function()
-				ProdBackup:Set("Configs", prodConfigs)
-			end)
-			
-			if not success then
-				Utilities.GBWarn("Failed to save production backup configs: " .. tostring(err))
-				return
-			end
-
-			Utilities.GBLog("Successfully saved production backup configs in studio environment.")
 		end
 	end)
 
