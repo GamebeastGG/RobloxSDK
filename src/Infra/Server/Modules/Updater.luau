@@ -19,7 +19,6 @@
 local Updater = { }
 
 --= Roblox Services =--
-local Players = game:GetService("Players")
 
 local RunService = game:GetService("RunService")
 local ChatService = game:GetService("Chat")
@@ -52,7 +51,6 @@ local MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME = 10
 --= Object References =--
 
 local PrimaryBackup = DatatstoreBackup.new(RunService:IsStudio())
-local ProdBackup = DatatstoreBackup.new(false)
 
 --= Variables =--
 
@@ -158,7 +156,7 @@ function Updater:SaveConfigsToBackup(newConfigs)
 	local newBackupConfigs = Utilities.recursiveCopy(newConfigs)
 	newBackupConfigs.GBConfigs.Experiments = nil
 
-	ProdBackup:Set("Configs", newBackupConfigs)
+	PrimaryBackup:Set("Configs", newBackupConfigs)
 end
 
 
