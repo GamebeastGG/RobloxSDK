@@ -1,5 +1,5 @@
 -- Contains version information for the SDK
 
 return {
-    version = "v0.9.1"
+    version = "v0.10.0"
 }
