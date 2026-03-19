@@ -287,6 +287,15 @@ function utilities:OnPlayerAdded(callback: (player: Player) -> ())
 	return game.Players.PlayerAdded:Connect(callback)
 end
 
+function utilities:FindPlayer(identifier: string | number): Player?
+	if tonumber(identifier) then
+		return game.Players:GetPlayerByUserId(tonumber(identifier))
+	else
+		return game.Players:FindFirstChild(identifier)
+	end
+	return nil
+end
+
 --[[
 	Calls the given functions in parallel, and waits for all of them to finish.
 ]]

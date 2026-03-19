@@ -19,6 +19,11 @@ local Experiments = shared.GBMod("InternalExperiments")
 -- For requests where we actually want to aggregate results from servers, publish to the GBRequests.GB_RESULT_TOPIC channel
 -- and the host will batch and report results
 
+local function Propagate(requestType, args : any?)
+	Utilities.publishMessage("GB_PROPAGATE", {fromServer = game.JobId, requestType = requestType, args = args})
+	
+end
+
 -- Functions we define for each request type from the GB dashboard
 local requestFunctions = {}
 
@@ -97,28 +102,18 @@ requestFunctions.funcs = {
 	["Kick"] = function(args)
 		local userIdentifier = args.playerId
 		-- We support UserIds + usernames from the dashboard
-		if tonumber(userIdentifier) then
-			--
-			for _, player in Players:GetPlayers() do
-				if player.UserId == tonumber(userIdentifier) then
-					local filteredReason = Utilities.promiseReturn(1, function()
-						return ChatService:FilterStringForBroadcast(args.reason, player)
-					end)
 
-					player:Kick(filteredReason)
-				end
-			end
-		else
-			local player = Players:FindFirstChild(userIdentifier)
-
-			if player then
-				local filteredReason = Utilities.promiseReturn(1, function()
-					return ChatService:FilterStringForBroadcast(args.reason, player)
-				end)
-				
-				player:Kick(filteredReason)
-			end
+		local player = Utilities:FindPlayer(userIdentifier)
+		if not player then
+			Propagate("Kick", {playerId = userIdentifier, reason = args.reason})
+			return
 		end
+		
+		local filteredReason = Utilities.promiseReturn(1, function()
+			return ChatService:FilterStringForBroadcast(args.reason, player)
+		end)
+
+		player:Kick(filteredReason)
 	end;
 	
 	-- host_only: false
@@ -126,6 +121,13 @@ requestFunctions.funcs = {
 	["UpdateConfigs"] = function(args)
 		Utilities.GBLog("Received config update request", args)
 		Updater:UpdateConfigs(args)
+
+		-- Tell other servers to refetch configs
+		Propagate("UpdateConfigs")
+
+		task.spawn(function()
+			Updater:SaveConfigsToBackup(args)
+		end)
 	end;
 
 	-- host_only: false
@@ -133,13 +135,16 @@ requestFunctions.funcs = {
 	["PropagateAvailableExperiments"] = function (args)
 		Utilities.GBLog("Received experiment update request", args)
 		Experiments:UpdateStateFromAvailableExperiments(args)
-	end,
+
+		-- Tell other servers to refetch configs, then update state by the result of that fetch!
+		Propagate("UpdateExperiments")
+		
+	end;
 
 	-- host_only: false
 	-- async: false
 	["PropagateExperimentReassignment"] = function (args)
-		Utilities.GBLog("Received experiment reassignment request", args)
-		Experiments:ProcessExperimentReassignmentRequest(args)
+		--DEPRECATED. Manually triggered only.
 	end
 }
 

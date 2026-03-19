@@ -21,16 +21,18 @@ local Updater = { }
 --= Roblox Services =--
 
 local RunService = game:GetService("RunService")
+local ChatService = game:GetService("Chat")
+local MessagingService = game:GetService("MessagingService")
 
 --= Dependencies =--
 
+local Signal = shared.GBMod("Signal")
+local MetaData = shared.GBMod("MetaData") ---@module MetaData
+local Utilities = shared.GBMod("Utilities")
 local GBRequests = shared.GBMod("GBRequests")
 local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
-local Utilities = shared.GBMod("Utilities")
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
-local Signal = shared.GBMod("Signal")
 local DatatstoreBackup = shared.GBMod("DatastoreBackup") ---@module DatastoreBackup
-local MetaData = shared.GBMod("MetaData") ---@module MetaData
 
 --= Types =--
 
@@ -47,6 +49,8 @@ local MetaData = shared.GBMod("MetaData") ---@module MetaData
 local MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME = 10
 
 --= Object References =--
+
+local PrimaryBackup = DatatstoreBackup.new(RunService:IsStudio())
 
 --= Variables =--
 
@@ -67,17 +71,8 @@ function Updater:UpdateConfigs(newConfigs, init)
 	local lastVersion = not init and currentGBConfigs["GBPublishTime"] or nil
 	
 	-- If we got an old configuration version over the wire for some reason, don't apply it
-	if lastVersion and newConfigs["GBConfigs"]["GBPublishTime"] <= lastVersion then
+	if lastVersion and newConfigs["GBConfigs"]["GBPublishTime"] < lastVersion then
 		return
-	end
-
-	--print("Loading new configs from Gamebeast")
-	-- Save newly received configs to datastore for backup purposes. Only the host server needs to do this for resource considerations.
-	-- Make sure we're not initializing and saving an already backed up config.
-	if shared.GBMod("HostServer"):IsHostServer() and not init then
-		task.spawn(function()
-			self:SaveConfigsToBackup(newConfigs)
-		end)
 	end
 
 	InternalConfigs:ApplyInternalConfigs(newConfigs["GBConfigs"])
@@ -141,7 +136,7 @@ end
 
 -- In the unlikely case GB is down, fall back on Roblox datastores
 function Updater:GetBackupConfigs()
-	local success, configs = DatatstoreBackup:Get("Configs")
+	local success, configs = PrimaryBackup:Get("Configs")
 	
 	if not success then
 		Utilities.GBWarn("Couldn't get configs from backup. Attempting to re-establish connection with Gamebeast...")
@@ -161,7 +156,7 @@ function Updater:SaveConfigsToBackup(newConfigs)
 	local newBackupConfigs = Utilities.recursiveCopy(newConfigs)
 	newBackupConfigs.GBConfigs.Experiments = nil
 
-	DatatstoreBackup:Set("Configs", newBackupConfigs)
+	PrimaryBackup:Set("Configs", newBackupConfigs)
 end
 
 
@@ -181,7 +176,7 @@ function Updater:Init()
 	-- Start up, ask for most recent configuations
 
 	local function fetchConfigs()
-		local success, newConfigsResp = GBRequests:GBRequestAsync("v1/configurations", nil, 1)
+		local success, newConfigsResp = GBRequests:GBRequestAsync("v1/configurations", nil)
 		if success then
 			return newConfigsResp.args
 		else
@@ -235,6 +230,41 @@ function Updater:Init()
 				InternalConfigs:ApplyConfigs(player, nil, nil)
 			end
 		end
+	end)
+
+	--Patch: Listen for propagation messages to trigger config and experiment refetch.
+	task.spawn(function()
+		Utilities.promiseReturn(1, function()
+			MessagingService:SubscribeAsync("GB_PROPAGATE", function(message)
+				if not message.Data or message.Data.fromServer == game.JobId then
+					return
+				end
+
+				if message.Data.requestType == "Kick" then
+					-- Don't need to refetch configs for kick requests
+					-- Temp redundant logic
+					local player = Utilities:FindPlayer(message.Data.args.playerId)
+					if not player then
+						return
+					end
+					
+					local filteredReason = Utilities.promiseReturn(1, function()
+						return ChatService:FilterStringForBroadcast(message.Data.args.reason, player)
+					end)
+
+					player:Kick(filteredReason)
+				elseif message.Data.requestType == "UpdateConfigs" or message.Data.requestType == "UpdateExperiments" then
+					local newConfigs = fetchConfigs()
+					if not newConfigs then
+						Utilities.GBWarn("Failed to fetch configs after receiving propagation message. Will retry when next propagation message is received.")
+						return
+					end
+
+					self:UpdateConfigs(newConfigs)
+				end
+
+			end)
+		end)
 	end)
 end
 

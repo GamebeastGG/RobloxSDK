@@ -21,12 +21,11 @@ local RunService = game:GetService("RunService")
 --= Dependencies =--
 
 local Timer = shared.GBMod("Timer") ---@module Timer
+local Signal = shared.GBMod("Signal") ---@module Signal
 local Cleaner = shared.GBMod("Cleaner")
 local Utilities = shared.GBMod("Utilities")
-local HostServer = shared.GBMod("HostServer") ---@module HostServer
 local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
 local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
-local FailedMarkers = shared.GBMod("FailedMarkers") ---@module FailedMarkers
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
 local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
 local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
@@ -114,6 +113,8 @@ end
 
 --= API Functions =--
 
+EngagementMarkers.MarkersFailed = Signal.new()
+
 -- Send batch to GB
 function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : any}?)
 	local isCustomQueue = queue ~= nil
@@ -131,11 +132,8 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 		
 		local success, errorBody = GBRequests:GBRequestAsync("v1/markers", data)
 		if not success then
-			if errorBody and errorBody.errorCode and DROP_MARKER_CODES[errorBody.errorCode] then
-				return false, errorBody -- Drop the markers if they were all rejected.
-			end
-			
 			-- If request failed, add markers back to queue for retry
+			local toRetry = {}
 			local invalidMarkerCount = 0
 			for _, marker in data.markers do
 				if not isMarkerDataValid(marker) then
@@ -143,14 +141,24 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 					continue
 				end
 				
-				FailedMarkers:AddMarker(marker)
+				if not isCustomQueue then
+					table.insert(toRetry, marker)
+				end
+			end
+
+			if toRetry[1] then
+				self.MarkersFailed:Fire(toRetry)
 			end
 
 			if invalidMarkerCount > 0 then
 				Utilities.GBWarn(`{invalidMarkerCount} of the {#data.markers} sent are invalid and will not be retried.`)
 			end
 
-			Utilities.GBWarn("Failed to send engagement markers to Gamebeast. Markers will be retried later.")
+			if errorBody and errorBody.errorCode and DROP_MARKER_CODES[errorBody.errorCode] then
+				return false, errorBody -- Drop the markers if they were all rejected.
+			end
+
+			Utilities.GBWarn("Failed to send engagement markers to Gamebeast.")
 		end
 		return success, errorBody
 	end
@@ -415,40 +423,6 @@ function EngagementMarkers:Init()
 		end
 	end)
 
-	task.spawn(function()
-		while task.wait(10) do
-			if not HostServer:IsHostServer() then
-				-- If not host, we don't need to send markers
-				continue
-			end
-
-			local processedCount = FailedMarkers:Get(1000, function(markers)
-				if #markers > 0 then
-					-- If we have markers to send, send them
-					local validMarkers = {}
-					local count = 0
-					for _, marker in markers do
-						if not isMarkerDataValid(marker) then
-							Utilities.GBWarn("Invalid marker data detected, skipping marker")
-							continue
-						end
-
-						table.insert(validMarkers, marker)
-						count += 1
-					end
-
-					self:SendMarkers(validMarkers)
-				end
-
-				-- NOTE: If send fails, it automatically re-inserts markers into the backup
-			end)
-
-			if processedCount <= 0 then
-				task.wait(55) -- Wait longer if no markers to process
-			end
-		end
-	end)
-
 	GBRequests:OnFinalRequestCall(function()
 		for _, data in WaitingPlayerMarkers do
 			data.resolved(true)
@@ -456,7 +430,6 @@ function EngagementMarkers:Init()
 
 		self:SendMarkers()
 
-		FailedMarkers:ForceSavePending()
 	end)
 end
 

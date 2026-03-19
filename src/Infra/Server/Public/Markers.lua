@@ -54,5 +54,16 @@ function Markers:SendNewPurchaseGrantedMarker(recieptInfo : {[string] : number |
     end)
 end
 
+function Markers:OnMarkersFailed(callback : (failedMarkers : { {[string] : any} } ) -> ()) : RBXScriptConnection
+    -- Implementation for handling failed markers
+    return EngagementMarkers.MarkersFailed:Connect(callback)
+end
+
+function Markers:RetryFailedMarkersAsync(failedMarkers : { {[string] : any} } ) : boolean
+    -- Implementation for retrying failed markers
+
+    return EngagementMarkers:SendMarkers(failedMarkers)
+end
+
 --= Return Module =--
 return Markers

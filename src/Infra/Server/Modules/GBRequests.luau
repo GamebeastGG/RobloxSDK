@@ -106,19 +106,19 @@ end
 
 -- Main method for dispatching requests from SDK to backend
 -- Returns parsed body and original response if body can be resolve and response only otherwise
-function GBRequests:GBRequest(requestRoute : string, args : {[string] : any}) : nil
+function GBRequests:GBRequest(requestRoute : string, args : {[string] : any}, headerOverrides : {[string] : any}?, maxRetries : number?) : nil
 	local _, requestsMethod = GetEndpointForRequest(requestRoute)
 	if requestsMethod ~= "POST" then
 		Utilities.GBWarn("GBRequest should only be used for POST requests. Use GBRequestAsync for other request types.")
 	end
 
 	task.spawn(function()
-		self:GBRequestAsync(requestRoute, args)
+		self:GBRequestAsync(requestRoute, args, headerOverrides, maxRetries)
 	end)
 end
 
 --YEILDS 
-function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any}, maxRetries : number?) : (boolean, any?)
+function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any}, headerOverrides : {[string] : any}?, maxRetries : number?) : (boolean, any?)
 	local authKey = YeildForKey() -- Will wait for Key and Settings to be set
 	local GBDomain, requestMethod = GetEndpointForRequest(requestRoute)
 	
@@ -148,6 +148,13 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 		["universeid"] = tostring(game.GameId),
 		["serverid"] = Utilities.getServerId(),
 	}
+
+	-- Apply header overrides if provided
+	if headerOverrides then
+		for key, value in headerOverrides do
+			headers[key] = value
+		end
+	end
 
 	local url = GBDomain.. "/".. requestRoute
 

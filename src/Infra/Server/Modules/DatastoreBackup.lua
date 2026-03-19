@@ -21,10 +21,8 @@ local RunService = game:GetService("RunService")
 --= Types =--
 
 --= Constants =--
-local BACKUP_STORE_KEY = (RunService:IsStudio() and "Studio" or "") .. "_Gamebeast_Backup"
 
 --= Object References =--
-local BackupConfigStore = DataStoreService:GetDataStore(BACKUP_STORE_KEY)
 
 --= Variables =--
 
@@ -36,7 +34,7 @@ local BackupConfigStore = DataStoreService:GetDataStore(BACKUP_STORE_KEY)
 
 function DatastoreBackup:Set(key, value) : boolean
     local success, errorMessage = pcall(function()
-        BackupConfigStore:SetAsync(key, value)
+        self._dataStore:SetAsync(key, value)
     end)
 
     if not success then
@@ -48,7 +46,7 @@ end
 
 function DatastoreBackup:Update(key, callback : (any) -> (any)) : boolean
     local success, errorMessage = pcall(function()
-        BackupConfigStore:UpdateAsync(key, callback)
+        self._dataStore:UpdateAsync(key, callback)
     end)
 
     if not success then
@@ -60,7 +58,7 @@ end
 
 function DatastoreBackup:Get(key) : (boolean, any)
     local success, value = pcall(function()
-        return BackupConfigStore:GetAsync(key)
+        return self._dataStore:GetAsync(key)
     end)
 
     if not success then
@@ -72,8 +70,15 @@ function DatastoreBackup:Get(key) : (boolean, any)
 end
 
 --= Initializers =--
-function DatastoreBackup:Init()
-    
+
+DatastoreBackup.__index = DatastoreBackup
+
+function DatastoreBackup.new(isStudio : boolean)
+    local self = setmetatable({}, DatastoreBackup)
+
+    self._dataStore = DataStoreService:GetDataStore((isStudio and "Studio" or "") .. "_Gamebeast_Backup")
+
+    return self
 end
 
 --= Return Module =--
