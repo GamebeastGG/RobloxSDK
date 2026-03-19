@@ -253,7 +253,7 @@ function Updater:Init()
 					end)
 
 					player:Kick(filteredReason)
-				else
+				elseif message.Data.requestType == "UpdateConfigs" or message.Data.requestType == "UpdateExperiments" then
 					local newConfigs = fetchConfigs()
 					if not newConfigs then
 						Utilities.GBWarn("Failed to fetch configs after receiving propagation message. Will retry when next propagation message is received.")
