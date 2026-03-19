@@ -40,6 +40,8 @@ export type MarkersService = {
 	SendMarker : (self : MarkersService, marker : string, data : JSON, position : Vector3?) -> (),
 	SendPlayerMarker : (self : MarkersService, player : Player, marker : string, data : JSON, position : Vector3?) -> (),
 	SendNewPurchaseGrantedMarker : (self : MarkersService, recieptInfo : {[string] : number | string}, position : Vector3?) -> (),
+	OnMarkersFailed : (self : MarkersService, callback : (failedMarkers : { {[string] : any} } ) -> ()) -> RBXScriptConnection,
+	RetryFailedMarkersAsync : (self : MarkersService, failedMarkers : { {[string] : any} } ) -> boolean,
 }
 
 export type JobsService = {
