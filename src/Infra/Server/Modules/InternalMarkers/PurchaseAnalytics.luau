@@ -48,22 +48,32 @@ local DevProductEventDebounce = {}
 
 --= Internal Functions =--
 
-local function GetProductInfo(itemId : number, itemType : Enum.InfoType)
+local function GetProductInfo(player : Player | number, itemId : number, itemType : Enum.InfoType) : {FromClient : boolean, Data : {[string] : any}}?
 	-- Check if we've already retrieved product info
 	if not ProductInfoCacheMap[itemType] then
 		ProductInfoCacheMap[itemType] = {}
 	end
 
+	local fromClient = false
 	local itemInfo = ProductInfoCacheMap[itemType][itemId]
 	if not itemInfo then
-		itemInfo = Utilities.getProductInfo(itemId, itemType)
+		if itemType ~= Enum.InfoType.Subscription then
+			itemInfo = Utilities.getProductInfo(itemId, itemType)
+		end
 
+		if not itemInfo then
+			itemInfo = ServerClientInfoHandler:GetProductInfoForPlayer(player, itemId, itemType)
+			fromClient = true
+		end
+		
 		-- In case of service failure even with retries
 		if not itemInfo then return end
-		ProductInfoCacheMap[itemType][itemId] = itemInfo
+		if not fromClient then
+			ProductInfoCacheMap[itemType][itemId] = itemInfo
+		end
 	end
 
-	return itemInfo
+	return {FromClient = fromClient, Data = itemInfo}
 end
 
 local function FlushProductPurchaseCache(player : Player)
@@ -86,24 +96,24 @@ end
 function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, fromReceipt : boolean, itemId : number, itemType : Enum.InfoType, metadataOverride : {[string] : any}?)
 	local player = Utilities.resolvePlayerObject(player)
 
-	local itemInfo = GetProductInfo(itemId, itemType)
-	if not itemInfo then
+	local itemInfo = GetProductInfo(player, itemId, itemType)
+	if not itemInfo and itemType ~= Enum.InfoType.Subscription then
 		return
 	end
 
 	--NOTE: In the event the client holds onto the request forever, we dont want to block the server.
-	local clientPrice = if itemInfo.PriceInRobux then ServerClientInfoHandler:GetProductPriceForPlayer(player, itemId, itemType) else nil
+	local clientData = if itemInfo.FromClient then itemInfo.Data else ServerClientInfoHandler:GetProductInfoForPlayer(player, itemId, itemType)
 
 	-- Sanity check the client price
-	if clientPrice then
+	if clientData.PriceInRobux and itemInfo.Data.PriceInRobux > 0 then
 		-- Price can only be a minimum of 30% the base price.
-		if clientPrice/itemInfo.PriceInRobux < 0.3 then
-			clientPrice = nil
+		if clientData.PriceInRobux / itemInfo.PriceInRobux < 0.3 then
+			clientData = nil
 		end
 
 		-- Price cant be greater than the base price.
-		if clientPrice > itemInfo.PriceInRobux then
-			clientPrice = nil
+		if clientData.PriceInRobux > itemInfo.PriceInRobux then
+			clientData = nil
 		end
 	end
 
@@ -112,10 +122,11 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, fromRecei
 		["fromReceipt"] = fromReceipt,
 		["type"] = ENUM_TO_TYPE[itemType] or "unknown",
 		["id"] = itemId,
-		["price"] = clientPrice or itemInfo.PriceInRobux,
-		["basePrice"] = itemInfo.PriceInRobux,
-		["name"] = itemInfo.Name,
-		["description"] = itemInfo.Description,
+		["price"] = clientData and clientData.PriceInRobux or itemInfo.Data.PriceInRobux,
+		["basePrice"] = itemInfo.Data.PriceInRobux,
+		["localPrice"] = if clientData then clientData.DisplayPrice else nil,
+		["name"] = itemInfo.Data.Name,
+		["description"] = itemInfo.Data.Description,
 		["imageId"] = "https://assetdelivery.roblox.com/v1/asset?id=".. itemId
 	}
 

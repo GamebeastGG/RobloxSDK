@@ -23,12 +23,14 @@ local Signal = shared.GBMod("Signal")
 local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
 local SignalTimeout = shared.GBMod("SignalTimeout") ---@module SignalTimeout
 local Schema = shared.GBMod("Schema") ---@module Schema
+local Utilities = shared.GBMod("Utilities") ---@module Utilities
 
 --= Types =--
 
 --= Object References =--
 
 local ClientInfoRemote = GetRemote("Event", "ClientInfoChanged")
+local ClientInfoRequestRemote = GetRemote("Function", "GetClientInfo")
 local ClientProductPriceRemote = GetRemote("Function", "GetProductPrice")
 local ClientInfoResolvedSignal = Signal.new()
 local ClientInfoChangedSignal = Signal.new()
@@ -198,7 +200,7 @@ function ServerClientInfoHandler:WaitUntilClientInfoResolved(player: Player, tim
     end
 end
 
-function ServerClientInfoHandler:GetProductPriceForPlayer(player : Player | number, productId : number, productType : Enum.InfoType) : number?
+function ServerClientInfoHandler:GetProductInfoForPlayer(player : Player | number, productId : number, productType : Enum.InfoType) : {[string] : any}?
     if typeof(player) == "number" then
         player = Players:GetPlayerByUserId(player)
     end
@@ -208,9 +210,7 @@ function ServerClientInfoHandler:GetProductPriceForPlayer(player : Player | numb
     end
 
     local success, result = pcall(function()
-        local price = ClientProductPriceRemote:InvokeClient(player, productId, productType)
-        assert(typeof(price) == "number" and price >= 0, "Invalid price from client")
-        return price
+        return ClientProductPriceRemote:InvokeClient(player, productId, productType)
     end)
 
     if not success then
@@ -237,6 +237,17 @@ end
 
 --= Initializers =--
 function ServerClientInfoHandler:Init()
+
+    Utilities:OnPlayerAdded(function(player)
+        local success, clientInfo = pcall(function()
+            return ClientInfoRequestRemote:InvokeClient(player)
+        end)
+        
+        if success and clientInfo then
+            UpdateClientInfoCache(player, clientInfo)
+        end
+    end)
+
     Players.PlayerRemoving:Connect(function(player : Player)
         ClientInfoResolvedSignal:Fire(player, nil)
         task.defer(function()
