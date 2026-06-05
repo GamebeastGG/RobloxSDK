@@ -225,7 +225,7 @@ function PurchaseAnalytics:Init()
 		end
 	end)]]
 
-	Players.PlayerRemoving:Connect(FlushProductPurchaseCache)
+	Players.PlayerRemoving:Connect(FlushProductPurchaseCache) --NOTE: DEPRECATED, UPDATE IF ABOVE IS RE-ENABLED
 end
 
 --= Return Module =--

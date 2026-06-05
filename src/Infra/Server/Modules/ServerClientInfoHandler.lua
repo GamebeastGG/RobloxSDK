@@ -24,6 +24,7 @@ local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
 local SignalTimeout = shared.GBMod("SignalTimeout") ---@module SignalTimeout
 local Schema = shared.GBMod("Schema") ---@module Schema
 local Utilities = shared.GBMod("Utilities") ---@module Utilities
+local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
 
 --= Types =--
 
@@ -71,7 +72,7 @@ local DefaultInfo = Schema.new({
 
 --= Variables =--
 
-local ClientInfoCache = {}
+local ClientInfoCache = ServerGate:GetCache()
 
 --= Public Variables =--
 
@@ -242,7 +243,7 @@ function ServerClientInfoHandler:Init()
         local success, clientInfo = pcall(function()
             return ClientInfoRequestRemote:InvokeClient(player)
         end)
-        
+
         if success and clientInfo then
             UpdateClientInfoCache(player, clientInfo)
         end
@@ -250,9 +251,6 @@ function ServerClientInfoHandler:Init()
 
     Players.PlayerRemoving:Connect(function(player : Player)
         ClientInfoResolvedSignal:Fire(player, nil)
-        task.defer(function()
-            ClientInfoCache[player] = nil
-        end)
     end)
 
     ClientInfoRemote.OnServerEvent:Connect(UpdateClientInfoCache)

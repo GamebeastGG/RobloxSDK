@@ -20,6 +20,7 @@ local Players = game:GetService("Players")
 
 local Signal = shared.GBMod("Signal") ---@module Signal
 local Schema = shared.GBMod("Schema") ---@module Schema
+local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
 
 --= Types =--
 
@@ -40,7 +41,7 @@ local DEFAULT_SCHEMA = Schema.new({
 
 --= Variables =--
 
-local SessionData = {}
+local SessionData = ServerGate:GetCache() -- Cache for player session data, automatically cleared on player leave
 
 --= Public Variables =--
 
@@ -92,7 +93,7 @@ function PlayerStats:OnDefaultStatsResolved(player : Player, callback : (stats :
     if SessionData[player] then
         connection:Disconnect() -- Disconnect immediately if already resolved
         task.spawn(function()
-            callback(SessionData[Players.LocalPlayer])
+            callback(SessionData[player])
         end)
     end
     return connection
@@ -100,23 +101,8 @@ end
 
 --= Initializers =--
 function PlayerStats:Init()
-
-    -- Set up state for player session
-    for _, player in Players:GetPlayers() do
+    ServerGate:OnPlayerAdded(function(player)
         self:Reset(player)
-    end
-
-    Players.PlayerAdded:Connect(function(player)
-        self:Reset(player)
-    end)
-
-    -- Other SDK modules may rely on state stored in this module for various purposes.
-    -- Because various modules might rely on this state, it's not safe for them to call clearPlayerSessionData themselves.
-    -- Run with delay to allow time to process and then clear to avoid memory leaks. Not likely worth doing some fancy dependency/roll call system.
-    Players.PlayerRemoving:Connect(function(player)
-        task.defer(function()
-            self:Clear(player)
-        end)
     end)
 end
 

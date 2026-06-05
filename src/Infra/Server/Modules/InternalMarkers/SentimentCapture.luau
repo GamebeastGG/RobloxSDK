@@ -23,6 +23,7 @@ local LocalizationService = game:GetService("LocalizationService")
 --= Dependencies =--
 
 local Utilities = shared.GBMod("Utilities")
+local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
 local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
 
 --= Types =--
@@ -33,8 +34,6 @@ local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
 
 --= Variables =--
 
-local ChatConnections = {}
-
 --= Public Variables =--
 
 --= Internal Functions =--
@@ -43,8 +42,8 @@ local ChatConnections = {}
 
 --= Initializers =--
 function SentimentCapture:Init()
-	Utilities:OnPlayerAdded(function(player)
-		ChatConnections[player] = player.Chatted:Connect(function(message)
+	ServerGate:OnPlayerAdded(function(player, cleaner)
+		cleaner:Add(player.Chatted:Connect(function(message) -- Auto disconnected on player leave
 			local position
 			
 			-- Compliance
@@ -62,15 +61,7 @@ function SentimentCapture:Init()
 			}
 	
 			EngagementMarkers:SDKMarker("Chat", args, {player = player, position = position})
-		end)
-	end)
-	
-	-- Clear session connections on player leave
-	Players.PlayerRemoving:Connect(function(player)
-		if ChatConnections[player] then
-			ChatConnections[player]:Disconnect()
-			ChatConnections[player] = nil
-		end
+		end))	
 	end)
 end
 

@@ -24,6 +24,7 @@ local Timer = shared.GBMod("Timer") ---@module Timer
 local Signal = shared.GBMod("Signal") ---@module Signal
 local Cleaner = shared.GBMod("Cleaner")
 local Utilities = shared.GBMod("Utilities")
+local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
 local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
 local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
@@ -59,7 +60,7 @@ local DROP_MARKER_CODES = {
 local WaitingPlayerMarkers = {}
 local MarkerQueue = {}
 -- Map of unique session IDs for users for player-associated markers
-local SessionIds = {}
+local SessionIds = ServerGate:GetCache() -- Use ServerGate cache to automatically clear on player leave
 local LastEventReportTime = 0
 local ClientInfoWarned = false
 
@@ -393,20 +394,8 @@ function EngagementMarkers:SDKMarker(...)
 	self:_createMarker("sdk", ...)
 end
 
-function EngagementMarkers:ClearSessionId(player : Player)
-	SessionIds[player] = nil
-end
-
 --= Initializers =--
 function EngagementMarkers:Init()
-	--NOTE: Firing markers from client is disabled. Shifting responsibility to the developer for security.
-
-	Players.ChildRemoved:Connect(function(player)
-		task.defer(function()
-			EngagementMarkers:ClearSessionId(player)
-		end)
-	end)
-
 	-- Check if time limit has elapsed and send current data, if any
 	task.spawn(function()
 		while task.wait(QUEUE_CHECK_TIME) do

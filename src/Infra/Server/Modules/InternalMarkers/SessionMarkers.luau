@@ -29,6 +29,7 @@ local LaunchDataResolver = shared.GBMod("LaunchDataResolver") ---@module LaunchD
 local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
 local PlayerStats = shared.GBMod("PlayerStats") ---@module PlayerStats
 local SocialHandler = shared.GBMod("SocialHandler") ---@module SocialHandler
+local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
 local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 
 --= Types =--
@@ -39,7 +40,7 @@ local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@modu
 
 --= Variables =--
 
-local LastCharPositions = {}
+local LastCharPositions = ServerGate:GetCache()
 local PlacesInUniverse = {}
 
 --= Public Variables =--
@@ -50,12 +51,12 @@ local PlacesInUniverse = {}
 
 --= Initializers =--
 function SessionMarkers:Init()
-	Utilities:OnPlayerAdded(function(player : Player)
+	ServerGate:OnPlayerAdded(function(player : Player, cleaner)
 		-- Collect last position with this event given PlayerRemoving was inconsistent on character still existing for providing position for Logout markers
-		player.CharacterRemoving:Connect(function(char)
+		cleaner:Add(player.CharacterRemoving:Connect(function(char)
 			local position = char.PrimaryPart and char.PrimaryPart.Position or nil
 			LastCharPositions[player] = position
-		end)
+		end))
 		
 		local joinData = player:GetJoinData()
 		-- Check if the player teleported into the game. Only send login marker if they did not teleport in.
@@ -101,7 +102,7 @@ function SessionMarkers:Init()
 				EngagementMarkers:SDKMarker("Login", loginArgs, {player = player, position = nil})
 			end)
 
-			PlayerStats:OnDefaultStatsResolved(function()
+			PlayerStats:OnDefaultStatsResolved(player, function()
 				ServerClientInfoHandler:UpdateClientData(player, "joinTime", PlayerStats:GetStat(player, "join_time"))
 			end)
         end
@@ -110,7 +111,6 @@ function SessionMarkers:Init()
 	Players.PlayerRemoving:Connect(function(player)
 		-- Collect last position for Logout marker
 		local position = LastCharPositions[player]
-		LastCharPositions[player] = nil
 		
 		-- Compute session length in addition to backend for reasons(?)
 		local clientJoinTime = ServerClientInfoHandler:GetClientInfo(player, "joinTime")
