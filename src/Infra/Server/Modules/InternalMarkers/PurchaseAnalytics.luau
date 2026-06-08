@@ -106,13 +106,8 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, fromRecei
 
 	-- Sanity check the client price
 	if clientData.PriceInRobux and itemInfo.Data.PriceInRobux > 0 then
-		-- Price can only be a minimum of 30% the base price.
-		if clientData.PriceInRobux / itemInfo.PriceInRobux < 0.3 then
-			clientData = nil
-		end
-
 		-- Price cant be greater than the base price.
-		if clientData.PriceInRobux > itemInfo.PriceInRobux then
+		if clientData.PriceInRobux > itemInfo.Data.PriceInRobux then
 			clientData = nil
 		end
 	end
@@ -155,7 +150,7 @@ function PurchaseAnalytics:DevProductPurchased(fromReceipt : boolean, playerId :
 	end
 
 	-- Get the product info ahead of time.
-	local productInfo = GetProductInfo(itemId, Enum.InfoType.Product)
+	local productInfo = GetProductInfo(player, itemId, Enum.InfoType.Product)
 	if not productInfo then
 		return
 	end
@@ -197,15 +192,13 @@ function PurchaseAnalytics:Init()
 	end)
 
 	-- Purchase records for subscriptions
-	MarketplaceService.PromptSubscriptionPurchaseFinished:Connect(function(player, subscriptionId, didTryPurchasing)
-		if didTryPurchasing then
-			local success, subscriptionStatus = pcall(function()
-				return MarketplaceService:GetUserSubscriptionStatusAsync(player, subscriptionId)
-			end)
+	Players.UserSubscriptionStatusChanged:Connect(function(player, subscriptionId)
+		local success, subscriptionStatus = pcall(function()
+			return MarketplaceService:GetUserSubscriptionStatusAsync(player, subscriptionId)
+		end)
 
-			if success and subscriptionStatus.IsSubscribed then
-				self:UpdatePlayerSpend(player, false, subscriptionId, Enum.InfoType.Subscription)
-			end
+		if success and subscriptionStatus.IsSubscribed then
+			self:UpdatePlayerSpend(player, false, subscriptionId, Enum.InfoType.Subscription)
 		end
 	end)
 
