@@ -22,6 +22,7 @@ local RunService = game:GetService("RunService")
 
 local Utilities = shared.GBMod("Utilities") ---@module Utilities
 local Signal = shared.GBMod("Signal") ---@module Signal
+local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
 
 --= Types =--
 
@@ -105,11 +106,9 @@ function LaunchDataResolver:Init()
         ResolveData(player, nil)
     end)
 
-    Players.PlayerRemoving:Connect(function(player : Player)
-        task.defer(function()
-            LaunchDataCache[player] = nil
-            DidResolveCache[player] = nil
-        end)
+    ServerGate:OnPlayerRemoved(function(player)
+        LaunchDataCache[player] = nil
+        DidResolveCache[player] = nil
     end)
 end
 

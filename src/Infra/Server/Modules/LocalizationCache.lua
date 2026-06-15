@@ -20,6 +20,7 @@ local Players = game:GetService("Players")
 --= Dependencies =--
 
 local Utilities = shared.GBMod("Utilities") ---@module Utilities
+local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
 
 --= Types =--
 
@@ -29,7 +30,7 @@ local Utilities = shared.GBMod("Utilities") ---@module Utilities
 
 --= Variables =--
 
-local Cache = {}
+local Cache = ServerGate:GetCache()
 
 --= Public Variables =--
 
@@ -50,9 +51,7 @@ function LocalizationCache:GetRegionId(player : Player | number)
 
     if not Cache[player] then
         Cache[player] = {}
-    end
-
-    if Cache[player].regionId then
+    elseif Cache[player].regionId then
         return Cache[player].regionId
     end
 
@@ -75,9 +74,7 @@ function LocalizationCache:GetLocaleId(player : Player | number)
 
     if not Cache[player] then
         Cache[player] = {}
-    end
-
-    if Cache[player].localeId then
+    elseif Cache[player].localeId then
         return Cache[player].localeId
     end
 
@@ -93,11 +90,6 @@ function LocalizationCache:GetLocaleId(player : Player | number)
 end
 
 --= Initializers =--
-function LocalizationCache:Init()
-    Players.PlayerRemoving:Connect(function(player : Player)
-        Cache[player] = nil
-    end)
-end
 
 --= Return Module =--
 return LocalizationCache

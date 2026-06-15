@@ -10,7 +10,9 @@
 --]]
 
 --= Root =--
-local ClientInfoHandler = { }
+local ClientInfoHandler = {
+    Priority = 1000
+}
 
 --= Roblox Services =--
 
@@ -26,6 +28,7 @@ local ClientSessionPreservation = shared.GBMod("ClientSessionPreservation") ---@
 --= Object References =--
 
 local ClientInfoRemote = GetRemote("Event", "ClientInfoChanged")
+local ClientInfoRequestRemote = GetRemote("Function", "GetClientInfo")
 local ClientProductPriceRemote = GetRemote("Function", "GetProductPrice")
 
 --= Constants =--
@@ -80,20 +83,31 @@ do
     for key, value in ClientSessionPreservation:GetStoredData() do
         ClientInfoHandler:UpdateClientInfo(key, value)
     end
+end
+
+function ClientInfoHandler:Init()
+    ClientInfoRequestRemote.OnClientInvoke = function()
+        return CurrentClientInfoCache
+    end
 
     -- Geographic pricing
-    ClientProductPriceRemote.OnClientInvoke = function(productId : number, productType : Enum.InfoType) : number
+    ClientProductPriceRemote.OnClientInvoke = function(productId : number | string, productType : Enum.InfoType)
         if ProductInfoCache[productId] then
             return ProductInfoCache[productId]
         end
 
         local success, price = pcall(function()
-            return MarketplaceService:GetProductInfo(productId, productType)
+            if productType == Enum.InfoType.Subscription then
+                return MarketplaceService:GetSubscriptionProductInfoAsync(productId)
+            else
+                return MarketplaceService:GetProductInfoAsync(productId, productType)
+            end
         end)
+
 
         if success then
             ProductInfoCache[productId] = price
-            return price.PriceInRobux
+            return price
         else
             return nil
         end

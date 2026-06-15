@@ -22,7 +22,7 @@ local Players = game:GetService("Players")
 local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module EngagementMarkers
 local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 local PlayerStats = shared.GBMod("PlayerStats") ---@module PlayerStats
-local Cleaner = shared.GBMod("Cleaner") ---@module Cleaner
+local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
 
 --= Types =--
 
@@ -32,7 +32,7 @@ local Cleaner = shared.GBMod("Cleaner") ---@module Cleaner
 
 --= Variables =--
 
-local FriendsInServerCache = {}
+local FriendsInServerCache = ServerGate:GetCache()
 
 --= Public Variables =--
 
@@ -41,7 +41,6 @@ local FriendsInServerCache = {}
 local function CreateCacheEntry(player : Player) : { [string]: any }
     local newEntry = {
         LastClientUpdate = 0,
-        Cleaner = Cleaner.new(),
     }
 
     FriendsInServerCache[player] = newEntry
@@ -71,17 +70,17 @@ end
 
 --= Initializers =--
 function SocialHandler:Init()
-    local function playerAdded(player : Player)
+    ServerGate:OnPlayerAdded(function(player : Player, cleaner)
         local cacheEntry = CreateCacheEntry(player)
 
-        cacheEntry.Cleaner:Add(ServerClientInfoHandler:OnClientInfoChanged(player, function(key, _)
+        cleaner:Add(ServerClientInfoHandler:OnClientInfoChanged(player, function(key, _)
             if key == "friendClockStart" then
                 cacheEntry.LastClientUpdate = os.time()
             end
         end))
 
         local activeTeleportCount = 0
-        player.OnTeleport:Connect(function(teleportState, placeId)
+        cleaner:Add(player.OnTeleport:Connect(function(teleportState, placeId)
             if teleportState == Enum.TeleportState.RequestedFromServer then
                 PlayerStats:SetStat(player, "teleporting_to", placeId)
                 activeTeleportCount += 1
@@ -91,18 +90,7 @@ function SocialHandler:Init()
                     PlayerStats:SetStat(player, "teleporting_to", nil)
                 end
             end
-        end)
-    end
-
-    Players.PlayerAdded:Connect(playerAdded)
-    for _, player in ipairs(Players:GetPlayers()) do
-        task.spawn(playerAdded, player)
-    end
-	
-    Players.PlayerRemoving:Connect(function(player)
-        if FriendsInServerCache[player] then
-            FriendsInServerCache[player].Cleaner:Destroy()
-        end
+        end))
     end)
 end
 

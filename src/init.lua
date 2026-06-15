@@ -208,16 +208,25 @@ local function StartSDK()
 	DidRequire = true
 
 	-- Initialize all modules
-	--TODO: Priority system
+	local sortedInit = {}
 	for _, moduleData in (Modules) do
 		if type(moduleData.Module) ~= "table" then
 			continue
 		end
-
+		
 		local InitMethod = rawget(moduleData.Module, "Init")
 		if InitMethod then
-			task.spawn(InitMethod, moduleData.Module)
+			table.insert(sortedInit, {InitMethod = InitMethod, Module = moduleData.Module, Priority = rawget(moduleData.Module, "Priority") or 0})
 		end
+	end
+
+	-- Lower the priority number, earlier it runs
+	table.sort(sortedInit, function(a, b)
+		return a.Priority < b.Priority
+	end)
+
+	for _, initData in ipairs(sortedInit) do
+		task.spawn(initData.InitMethod, initData.Module)
 	end
 end
 

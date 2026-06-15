@@ -11,6 +11,7 @@ local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal)
 local Utilities = shared.GBMod("Utilities")
 local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
+local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
 local Cleaner = shared.GBMod("Cleaner") ---@module Cleaner
 local Types = require(script.Parent.Parent.Parent.Types)
 
@@ -449,10 +450,8 @@ function enableAssignment()
 				queueAssignment({ player })
 			end
 		end),
-		playerLeaveListener = Players.PlayerRemoving:Connect(function(player)
-			task.defer(function()
-				setAssignedPlayerGroupId(player, nil)
-			end)
+		playerLeaveListener = ServerGate:OnPlayerRemoved(function(player)
+			setAssignedPlayerGroupId(player, nil)
 		end),
 		deferredBulkAssignmentThread = nil,
 		activeGroupStateById = {},

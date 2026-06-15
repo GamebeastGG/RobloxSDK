@@ -186,8 +186,8 @@ end
 
 -- Get product info with promise wrapper
 utilities.getProductInfo = function(id, infoType)
-	return utilities.promiseReturn(nil, function()
-		return marketplaceService:GetProductInfo(id, infoType)
+	return utilities.promiseReturn(2, function()
+		return marketplaceService:GetProductInfoAsync(id, infoType)
 	end)
 end
 
