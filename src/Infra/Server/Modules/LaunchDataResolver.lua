@@ -17,6 +17,7 @@ local LaunchDataResolver = { }
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local EncodingService = game:GetService("EncodingService")
 
 --= Dependencies =--
 
@@ -91,8 +92,16 @@ function LaunchDataResolver:Init()
         end
 
         if rawLaunchData ~= "" then
+            -- Attempt a base64 decode
+            local base64Decoded, launchDataBuffer = pcall(function()
+                return EncodingService:Base64Decode(buffer.fromstring(rawLaunchData))
+            end)
+
+            -- Overwrite rawLaunchData if base64 decoded successfully, otherwise use the rawLaunchData
+            local launchData = if base64Decoded then buffer.tostring(launchDataBuffer) else rawLaunchData
+                
             local success, launchDataJson = pcall(function()
-                return HttpService:JSONDecode(rawLaunchData)
+                return HttpService:JSONDecode(launchData)
             end)
 
             if success then
