@@ -79,20 +79,20 @@ function LaunchDataResolver:Init()
         end
 
         local joinData = player:GetJoinData()
-        local launchData = joinData.LaunchData
+        local rawLaunchData = joinData.LaunchData
         local attemptCount = 0
 
-        while attemptCount < 10 and launchData == "" do
+        while attemptCount < 10 and rawLaunchData == "" do
             task.wait(0.5)
             attemptCount += 1
 
             local latestJoinData = player:GetJoinData()
-            launchData = latestJoinData.LaunchData
+            rawLaunchData = latestJoinData.LaunchData
         end
 
-        if launchData ~= "" then
+        if rawLaunchData ~= "" then
             local success, launchDataJson = pcall(function()
-                return HttpService:JSONDecode(launchData)
+                return HttpService:JSONDecode(rawLaunchData)
             end)
 
             if success then
