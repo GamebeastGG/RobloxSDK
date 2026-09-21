@@ -2,3 +2,5 @@
 /*.rbxlx.lock
 /*.rbxl.lock
 /tests/testez/*
+
+sourcemap.json

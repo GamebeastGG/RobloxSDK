@@ -7,8 +7,13 @@ type SDKSettings = {
 	sdkDebugEnabled : boolean,
 	-- Custom URL for the SDK, if any.
 	customUrl : string | nil,
-	-- Environment the SDK is set to.
-	environment : "production" | "studio" | nil
+	-- Environment the SDK is set to: "production", "studio", "development",
+	-- or the alias of a custom environment configured in the dashboard.
+	environment : string | nil,
+	-- Seconds between engagement marker batch flushes to the backend.
+	markerFlushRate : number,
+	-- Seconds between status polls checking for configuration and experiment changes.
+	statusPollRate : number
 }
 export type ServerSetupConfig = {
 	key : string | Secret,
@@ -44,18 +49,31 @@ export type MarkersService = {
 	RetryFailedMarkersAsync : (self : MarkersService, failedMarkers : { {[string] : any} } ) -> boolean,
 }
 
-export type JobsService = {
-	SetCallback : (self : JobsService, jobName : string, callback : (jobData : {[string] : any}) -> (any)) -> ()
-}
-
-export type EventsService = {
-	GetEventData : (self : EventsService, event : string) -> JSON,
-	OnStart : (self : EventsService, event : string, callback : (data : JSON) -> ()) -> RBXScriptConnection,
-	OnEnd : (self : EventsService, event : string, callback : (data : JSON) -> ()) -> RBXScriptConnection,
-}
+-- Developer-defined experiment targeting property: a scalar or a list of scalars (max 100 items).
+export type ExperimentPropertyValue = string | number | boolean | { string | number | boolean }
 
 export type ExperimentsService = {
+	SetPlayerProperties: (self: ExperimentsService, player: Player, properties: { [string]: ExperimentPropertyValue }) -> (),
+	SetPlayerProperty: (self: ExperimentsService, player: Player, key: string, value: ExperimentPropertyValue?) -> (),
+	GetPlayerProperties: (self: ExperimentsService, player: Player) -> { [string]: ExperimentPropertyValue },
+	SetServerProperties: (self: ExperimentsService, properties: { [string]: ExperimentPropertyValue }) -> (),
+	SetServerProperty: (self: ExperimentsService, key: string, value: ExperimentPropertyValue?) -> (),
+	GetServerProperties: (self: ExperimentsService) -> { [string]: ExperimentPropertyValue },
+	GetAssignmentsForPlayer: (self: ExperimentsService, player: Player) -> { ExperimentAssignment },
+	GetServerAssignments: (self: ExperimentsService) -> { ExperimentAssignment },
+	OnAssignmentsChangedForPlayer: (self: ExperimentsService, player: Player, callback: (assignments: { ExperimentAssignment }) -> ()) -> RBXScriptConnection,
+	OnServerAssignmentsChanged: (self: ExperimentsService, callback: (assignments: { ExperimentAssignment }) -> ()) -> RBXScriptConnection,
+	ObserveAssignmentsForPlayer: (self: ExperimentsService, player: Player, callback: (assignments: { ExperimentAssignment }) -> ()) -> RBXScriptConnection,
+	-- Deprecated: use GetAssignmentsForPlayer / GetServerAssignments instead.
 	GetGroupForPlayer: (self: ExperimentsService, player: Player) -> ExperimentGroupMetadata?,
+}
+export type ExperimentAssignment = {
+	experimentId: number,
+	experimentName: string,
+	groupId: number,
+	groupLabel: string,
+	unitType: "user" | "server",
+	source: string?,
 }
 export type ExperimentGroupMetadata = {
 	experimentName: string,
@@ -66,6 +84,6 @@ export type CohortsService = {
 	GetCohortMembershipStatusAsync : (self : CohortsService, cohortName : string, userIds : { number }) -> { [ number ] : boolean }
 }
 
-export type Service = ConfigsService | MarkersService | EventsService | JobsService | ExperimentsService | CohortsService
+export type Service = ConfigsService | MarkersService | ExperimentsService | CohortsService
 
 return true

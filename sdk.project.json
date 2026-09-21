@@ -1,0 +1,13 @@
+{
+  "name": "Roblox SDK",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Gamebeast": {
+        "$path": "src"
+      }
+    }
+  }
+}

@@ -29,9 +29,9 @@ export type JSON = Types.JSON
 -- Services
 export type ConfigsService = Types.ConfigsService
 export type MarkersService = Types.MarkersService
-export type JobsService = Types.JobsService
-export type EventsService = Types.EventsService
 export type ExperimentsService = Types.ExperimentsService
+export type ExperimentAssignment = Types.ExperimentAssignment
+export type ExperimentPropertyValue = Types.ExperimentPropertyValue
 export type CohortsService = Types.CohortsService
 
 type ModuleData = {
@@ -76,7 +76,21 @@ local DEFAULT_SETTINGS = {
 	environment = {
 		value = nil,
 		validator = function(val)
-			return val == "production" or val == "studio" or val == nil
+			-- Built-in aliases are "production", "studio" and "development";
+			-- any other non-empty string targets a custom environment by its alias.
+			return val == nil or (type(val) == "string" and #val > 0)
+		end
+	},
+	markerFlushRate = {
+		value = 10,
+		validator = function(val)
+			return type(val) == "number" and val >= 1
+		end
+	},
+	statusPollRate = {
+		value = 30,
+		validator = function(val)
+			return type(val) == "number" and val >= 5
 		end
 	},
 }

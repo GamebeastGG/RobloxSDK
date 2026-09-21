@@ -4,15 +4,14 @@
 --[[
 	The Gamebeast SDK is Copyright © 2023 Gamebeast, Inc. to present.
 	All rights reserved.
-	
+
 	Updater.luau
-	
+
 	Description:
-		Handles updating the internal configurations of the Gamebeast SDK
-		based on the latest configurations received from the Gamebeast server.
-		It also manages experiment assignments and applies configurations
-		to players and the server.
-	
+		Bootstraps the SDK's configuration and experiment state from the backend,
+		polls the status endpoint for changes, and composes evaluated config views
+		(base + experiment changesets) for the server and players.
+
 --]]
 
 --= Root =--
@@ -21,15 +20,15 @@ local Updater = { }
 --= Roblox Services =--
 
 local RunService = game:GetService("RunService")
-local ChatService = game:GetService("Chat")
-local MessagingService = game:GetService("MessagingService")
+local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local Signal = shared.GBMod("Signal")
 local MetaData = shared.GBMod("MetaData") ---@module MetaData
+local DataCache = shared.GBMod("DataCache")
 local Utilities = shared.GBMod("Utilities")
 local GBRequests = shared.GBMod("GBRequests")
+local Changesets = shared.GBMod("Changesets") ---@module Changesets
 local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
 local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
 local DatatstoreBackup = shared.GBMod("DatastoreBackup") ---@module DatastoreBackup
@@ -48,49 +47,115 @@ local DatatstoreBackup = shared.GBMod("DatastoreBackup") ---@module DatastoreBac
 ]]
 local MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME = 10
 
+--[[
+	Trailing debounce for backup saves, to respect DataStore same-key write throttling
+	when several config changes land in a short window.
+]]
+local BACKUP_SAVE_DEBOUNCE = 30
+
+--[[
+	How long to wait between attempts to reach the backend when bootstrap fails.
+]]
+local CONNECTION_RETRY_DELAY = 10
+
+--[[
+	Version stamp for the backup blob format. Old-format backups are rejected.
+]]
+local BACKUP_SCHEMA_VERSION = 2
+
 --= Object References =--
 
 local PrimaryBackup = DatatstoreBackup.new(RunService:IsStudio())
 
 --= Variables =--
 
+local BackupSavePending = false
+
 --= Public Variables =--
 
 --= Internal Functions =--
 
-
+-- Backups are scoped per environment so switching environments never restores
+-- another environment's configs on the startup fallback path.
+local function GetBackupKey() : string
+	local environment = DataCache:Get("Settings").environment
+		or (RunService:IsStudio() and "studio" or "production")
+	return "Configs_".. environment
+end
 
 --= API Functions =--
 
-Updater.ModuleUpdated = Signal.new()
-Updater.ConfigChanged = Signal.new()
-
--- Update modules based on config data in new module version
-function Updater:UpdateConfigs(newConfigs, init)
-	local currentGBConfigs = InternalConfigs:GetActiveConfig("GBConfigs")
-	local lastVersion = not init and currentGBConfigs["GBPublishTime"] or nil
-	
-	-- If we got an old configuration version over the wire for some reason, don't apply it
-	if lastVersion and newConfigs["GBConfigs"]["GBPublishTime"] < lastVersion then
+-- Composes and applies the evaluated views for a single config: the server view,
+-- plus per-player views for players with experiment overlays.
+-- `oldPrivacy` is passed through when the config's base just changed.
+function Updater:ComposeAndApplyConfig(configId : number, init : boolean?, oldPrivacy : { {string} }?)
+	local entry = InternalConfigs:GetBaseConfig(configId)
+	if not entry then
 		return
 	end
 
-	InternalConfigs:ApplyInternalConfigs(newConfigs["GBConfigs"])
+	local serverView = Changesets.apply(entry.base, Experiments:GetChangesetsForConfig(configId))
+	InternalConfigs:ApplyConfigs(nil, configId, serverView, init, oldPrivacy)
 
-	-- Update game configs
-	init = init or not InternalConfigs:IsReady()
+	for _, player in Players:GetPlayers() do
+		if Experiments:HasPlayerOverlays(player, configId) then
+			local playerView = Changesets.apply(entry.base, Experiments:GetChangesetsForConfig(configId, player))
+			InternalConfigs:ApplyConfigs(player, configId, playerView, init, oldPrivacy)
+		elseif entry.viewByPlayer[player] then
+			-- Player lost their overlays; revert them to the server view
+			InternalConfigs:ApplyConfigs(player, configId, nil, init, oldPrivacy)
+		end
+	end
+end
 
-	-- Trigger experiment assignment, if applicable
+function Updater:ComposeAndApplyAll(init : boolean?, oldPrivacyByConfigId : { [number] : { {string} } }?)
+	for configId in InternalConfigs:GetConfigHashes() do
+		self:ComposeAndApplyConfig(configId, init, oldPrivacyByConfigId and oldPrivacyByConfigId[configId])
+	end
+end
+
+-- Recomposes a single player's views after their experiment assignments changed.
+function Updater:ComposeAndApplyForPlayer(player : Player)
+	for configId in InternalConfigs:GetConfigHashes() do
+		local entry = InternalConfigs:GetBaseConfig(configId)
+		if not entry then
+			continue
+		end
+
+		if Experiments:HasPlayerOverlays(player, configId) then
+			local playerView = Changesets.apply(entry.base, Experiments:GetChangesetsForConfig(configId, player))
+			InternalConfigs:ApplyConfigs(player, configId, playerView)
+		elseif entry.viewByPlayer[player] then
+			InternalConfigs:ApplyConfigs(player, configId, nil)
+		end
+	end
+end
+
+-- Applies a full bootstrap payload: registers configs, reconciles experiments
+-- (bounded by the initial assignment wait), then composes and applies all views.
+function Updater:ApplyBootstrap(bootstrap, init : boolean?)
+	-- Register config base documents, keeping old privacy for transition diffing
+	local oldPrivacyByConfigId = {}
+	local seenConfigIds = {}
+	for _, configData in bootstrap.configurations do
+		oldPrivacyByConfigId[configData.id] = InternalConfigs:SetBaseConfig(configData)
+		seenConfigIds[configData.id] = true
+	end
+
+	-- Drop configs that no longer exist (e.g. re-bootstrap after an outage)
+	for configId in InternalConfigs:GetConfigHashes() do
+		if not seenConfigIds[configId] then
+			InternalConfigs:RemoveConfig(configId)
+		end
+	end
+
+	-- Reconcile experiments and trigger assignment, if applicable
 	-- (this may yield, so it's limited by a timer to avoid blocking config readiness for too long)
-	local availableExperimentsSnapshot = newConfigs.GBConfigs.Experiments
-	if availableExperimentsSnapshot then
+	if bootstrap.experiments then
 		local thread = coroutine.running()
 		local didResume = false
 		task.spawn(function ()
-			Experiments:UpdateStateFromAvailableExperiments(availableExperimentsSnapshot, {
-				variables = newConfigs.configs,
-				options = newConfigs.options,
-			})
+			Experiments:UpdateCatalog(bootstrap.experiments, bootstrap.requiredProperties)
 			if not didResume then
 				didResume = true
 				coroutine.resume(thread)
@@ -108,57 +173,129 @@ function Updater:UpdateConfigs(newConfigs, init)
 		end
 	end
 
-	-- If players are assigned to an experiment, use that config for them
-	for player, playerConfigs in Experiments.AssignedConfigByPlayer do
-		InternalConfigs:ApplyConfigs(player, playerConfigs.variables, playerConfigs.options.privacy, init)
-	end
+	self:ComposeAndApplyAll(init, oldPrivacyByConfigId)
 
-	-- If server is assigned to an experiment, use that config, otherwise use canonical config
-	if Experiments.AssignedServerConfig then
-		InternalConfigs:ApplyConfigs(
-			nil,
-			Experiments.AssignedServerConfig.variables,
-			Experiments.AssignedServerConfig.options.privacy,
-			init
-		)
-	else
-		InternalConfigs:ApplyConfigs(nil, newConfigs.configs, newConfigs.options.privacy, init)
-	end
-
-	--[[ Signal mod update
-	if not init then
-		self.ModuleUpdated:Fire()
-		ModuleUpdatedRemote:FireAllClients()
-	end
-	]]
+	self:QueueBackupSave()
 end
 
+-- Applies a status poll payload: refetches configs whose hash changed, removes
+-- configs that disappeared, and reconciles the experiment catalog.
+function Updater:ApplyStatus(status)
+	local knownHashes = InternalConfigs:GetConfigHashes()
+	local seenConfigIds = {}
+
+	for _, configStatus in status.configurations do
+		seenConfigIds[configStatus.id] = true
+
+		if knownHashes[configStatus.id] == configStatus.hash then
+			-- Content unchanged, but the identity (alias/name) may still have moved
+			InternalConfigs:UpdateConfigIdentity(configStatus.id, configStatus.name, configStatus.alias)
+			continue
+		end
+
+		-- The backend resolves configurations by alias only (normalized the same way it
+		-- stores them); a name slugs to the same value, so it serves as the fallback.
+		local configIdentifier = configStatus.alias or configStatus.name
+		if not configIdentifier then
+			Utilities.GBWarn("Config", configStatus.id, "has no alias or name and cannot be refetched.")
+			continue
+		end
+
+		local didSucceed, configResp, statusCode = GBRequests:GBRequestAsync("v2/configurations", {
+			configuration = configIdentifier,
+			hash = knownHashes[configStatus.id],
+		})
+
+		if statusCode == 304 then
+			continue
+		end
+
+		if not didSucceed or not configResp then
+			Utilities.GBWarn("Failed to fetch updated config:", configStatus.id)
+			continue
+		end
+
+		-- The single-config response carries no alias; identity comes from the status payload
+		local oldPrivacy = InternalConfigs:SetBaseConfig({
+			id = configStatus.id,
+			name = configStatus.name,
+			alias = configStatus.alias,
+			hash = configResp.hash,
+			updatedAt = configResp.updatedAt,
+			configuration = configResp.configuration,
+			privacy = configResp.privacy,
+		})
+
+		self:ComposeAndApplyConfig(configStatus.id, nil, oldPrivacy)
+		self:QueueBackupSave()
+	end
+
+	for configId in knownHashes do
+		if not seenConfigIds[configId] then
+			Utilities.GBLog("Config removed:", configId)
+			InternalConfigs:RemoveConfig(configId)
+			self:QueueBackupSave()
+		end
+	end
+
+	Experiments:UpdateCatalog(status.experiments, status.requiredProperties)
+end
 
 -- In the unlikely case GB is down, fall back on Roblox datastores
 function Updater:GetBackupConfigs()
-	local success, configs = PrimaryBackup:Get("Configs")
-	
+	local success, backup = PrimaryBackup:Get(GetBackupKey())
+
 	if not success then
 		Utilities.GBWarn("Couldn't get configs from backup. Attempting to re-establish connection with Gamebeast...")
+		return nil
 	end
 
-	-- Clear any experiment snapshot data from the backup configs
-	if configs then
-		configs.GBConfigs.Experiments = nil
+	-- Reject old-format backups; they cannot be fed into the v2 pipeline
+	if not backup or backup.schemaVersion ~= BACKUP_SCHEMA_VERSION then
+		return nil
 	end
 
-	return configs
+	return backup.configurations
 end
 
--- Save new configs to Roblox datastores for backup
--- NOTE: if a server is starting up and there are a bunch of update config jobs pending, this can throttle, should probably add a flag
-function Updater:SaveConfigsToBackup(newConfigs)
-	local newBackupConfigs = Utilities.recursiveCopy(newConfigs)
-	newBackupConfigs.GBConfigs.Experiments = nil
+-- Save current config base documents to Roblox datastores for backup.
+-- Experiments are never backed up; assignments cannot be resolved offline.
+function Updater:SaveConfigsToBackup()
+	local configurations = {}
+	for configId in InternalConfigs:GetConfigHashes() do
+		local entry = InternalConfigs:GetBaseConfig(configId)
+		if entry then
+			table.insert(configurations, {
+				id = entry.id,
+				name = entry.name,
+				alias = entry.alias,
+				hash = entry.hash,
+				updatedAt = entry.updatedAt,
+				configuration = entry.base,
+				privacy = entry.privacy,
+			})
+		end
+	end
 
-	PrimaryBackup:Set("Configs", newBackupConfigs)
+	PrimaryBackup:Set(GetBackupKey(), {
+		schemaVersion = BACKUP_SCHEMA_VERSION,
+		savedAt = DateTime.now().UnixTimestampMillis,
+		configurations = configurations,
+	})
 end
 
+-- Queues a debounced backup save, coalescing bursts of config changes into one write.
+function Updater:QueueBackupSave()
+	if BackupSavePending then
+		return
+	end
+
+	BackupSavePending = true
+	task.delay(BACKUP_SAVE_DEBOUNCE, function()
+		BackupSavePending = false
+		self:SaveConfigsToBackup()
+	end)
+end
 
 --= Initializers =--
 function Updater:Init()
@@ -173,98 +310,76 @@ function Updater:Init()
 		end
 	end)
 
-	-- Start up, ask for most recent configuations
+	-- Start up, bootstrap configurations and experiments
 
-	local function fetchConfigs()
-		local success, newConfigsResp = GBRequests:GBRequestAsync("v1/configurations", nil)
+	local function fetchBootstrap()
+		local success, bootstrap = GBRequests:GBRequestAsync("v2/bootstrap")
 		if success then
-			return newConfigsResp.args
+			return bootstrap
 		else
 			return nil
 		end
 	end
 
-	local newConfigs = fetchConfigs()
+	local bootstrap = fetchBootstrap()
+
 	-- If no response or failed status, attempt to recover
-	if not newConfigs then
+	if not bootstrap then
 		Utilities.GBWarn("Couldn't get configurations from Gamebeast. Attempting to load from backup...")
-		-- Try to get datastore backed up configs
-		newConfigs = self:GetBackupConfigs()
 
-		-- If they've never published configs / no backup for this project, then we have to wait for a connection or we would error every other part of the system. Extremely unlikely.
-		if not newConfigs then
-			repeat
-				task.wait(10)
-				Utilities.GBWarn("Attempting to establish connection...")
-				newConfigs = fetchConfigs()
-			until newConfigs
-
-			Utilities.GBWarn("Connection established, fetching configurations...")
+		-- Try to get datastore backed up configs so the game can run while we reconnect
+		local backupConfigurations = self:GetBackupConfigs()
+		local didApplyBackup = false
+		if backupConfigurations then
+			self:ApplyBootstrap({
+				configurations = backupConfigurations,
+				experiments = { user = {}, server = {} },
+				requiredProperties = {},
+			}, true)
+			didApplyBackup = true
 		end
+
+		-- Wait for a live connection; everything else in the SDK depends on it
+		repeat
+			task.wait(CONNECTION_RETRY_DELAY)
+			Utilities.GBWarn("Attempting to establish connection...")
+			bootstrap = fetchBootstrap()
+		until bootstrap
+
+		Utilities.GBWarn("Connection established, fetching configurations...")
+
+		-- If the backup was applied, this is no longer an initialization: diff and replicate
+		self:ApplyBootstrap(bootstrap, not didApplyBackup)
+	else
+		self:ApplyBootstrap(bootstrap, true)
 	end
 
-	-- Update configs for server with initialization flag
-	self:UpdateConfigs(newConfigs, true)
-
-	-- When the server's assigned experiment config changes, update the internal configs
-	Experiments.OnAssignedServerConfigChanged:Connect(function (newAssignedConfigs)
+	-- When experiment assignments change, recompose the affected evaluated views
+	Experiments.OnServerAssignmentsChanged:Connect(function()
 		if InternalConfigs:IsReady() then
-			if newAssignedConfigs then
-				InternalConfigs:ApplyConfigs(nil, newAssignedConfigs.variables, newAssignedConfigs.options.privacy)
-			else
-				InternalConfigs:ApplyConfigs(
-					nil,
-					Experiments.CanonicalServerConfig.variables,
-					Experiments.CanonicalServerConfig.options.privacy
-				)
-			end
+			self:ComposeAndApplyAll()
 		end
 	end)
 
-	-- When players' assigned experiment config changes, update per-player internal configs
-	Experiments.OnAssignedPlayerConfigChanged:Connect(function (player, newAssignedConfigs)
+	Experiments.OnPlayerAssignmentsChanged:Connect(function(player : Player)
 		if InternalConfigs:IsReady() then
-			if newAssignedConfigs then
-				InternalConfigs:ApplyConfigs(player, newAssignedConfigs.variables, newAssignedConfigs.options.privacy)
-			else
-				InternalConfigs:ApplyConfigs(player, nil, nil)
-			end
+			self:ComposeAndApplyForPlayer(player)
 		end
 	end)
 
-	--Patch: Listen for propagation messages to trigger config and experiment refetch.
+	-- Poll the status endpoint for configuration and experiment changes
 	task.spawn(function()
-		Utilities.promiseReturn(1, function()
-			MessagingService:SubscribeAsync("GB_PROPAGATE", function(message)
-				if not message.Data or message.Data.fromServer == game.JobId then
-					return
-				end
+		while true do
+			task.wait(DataCache:Get("Settings").statusPollRate)
 
-				if message.Data.requestType == "Kick" then
-					-- Don't need to refetch configs for kick requests
-					-- Temp redundant logic
-					local player = Utilities:FindPlayer(message.Data.args.playerId)
-					if not player then
-						return
-					end
-					
-					local filteredReason = Utilities.promiseReturn(1, function()
-						return ChatService:FilterStringForBroadcast(message.Data.args.reason, player)
-					end)
+			local didSucceed, status = GBRequests:GBRequestAsync("v2/status")
+			if not didSucceed or not status then
+				Utilities.GBLog("Status poll failed, retrying next interval")
+				continue
+			end
 
-					player:Kick(filteredReason)
-				elseif message.Data.requestType == "UpdateConfigs" or message.Data.requestType == "UpdateExperiments" then
-					local newConfigs = fetchConfigs()
-					if not newConfigs then
-						Utilities.GBWarn("Failed to fetch configs after receiving propagation message. Will retry when next propagation message is received.")
-						return
-					end
-
-					self:UpdateConfigs(newConfigs)
-				end
-
-			end)
-		end)
+			self:ApplyStatus(status)
+		end
 	end)
 end
 

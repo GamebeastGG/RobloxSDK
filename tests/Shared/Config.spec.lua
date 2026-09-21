@@ -1,6 +1,6 @@
 --[[
     Requires dashboard interaction.
-    Set a config equal to:
+    Create a configuration with the alias (or name) "TestConfig" containing:
 
     Test = {
         A = {
@@ -9,6 +9,8 @@
     }
 
     Then, run the test.
+
+    NOTE: Config paths begin with the configuration's alias or name.
 ]]
 
 return function()
@@ -21,24 +23,29 @@ return function()
             expect(configReady).to.be.a("boolean")
         end)
 
-        it("should get a config", function()
-            local config = ConfigsService:Get("Test")
+        it("should get a whole config", function()
+            local config = ConfigsService:Get("TestConfig")
             expect(config).to.be.ok()
         end)
 
-        it("should get a config from table", function()
-            local config = ConfigsService:Get({"Test", "A", "B"})
+        it("should get a config value", function()
+            local config = ConfigsService:Get({"TestConfig", "Test"})
+            expect(config).to.be.ok()
+        end)
+
+        it("should get a config value from a nested path", function()
+            local config = ConfigsService:Get({"TestConfig", "Test", "A", "B"})
             expect(config).to.be.equal("Hello")
         end)
 
         it("should listen to a config changing", function()
-            ConfigsService:OnChanged("Test", function(newValue)
+            ConfigsService:OnChanged("TestConfig", function(newValue)
                 expect(newValue).to.be.ok()
             end)
         end)
 
         it("should listen to a config changing from table", function()
-            ConfigsService:OnChanged({"Test", "A", "B"}, function(newValue)
+            ConfigsService:OnChanged({"TestConfig", "Test", "A", "B"}, function(newValue)
                 expect(newValue).to.be.ok()
             end)
         end)
