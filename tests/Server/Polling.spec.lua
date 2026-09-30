@@ -24,6 +24,8 @@ return function()
 
         afterAll(function()
             settings.statusPollRate = previousPollRate
+            -- There is no getter for the directive in force, so this leaves the running SDK
+            -- without one until the next status poll re-applies it from the payload
             Updater:SetPollingDirective(nil)
         end)
 

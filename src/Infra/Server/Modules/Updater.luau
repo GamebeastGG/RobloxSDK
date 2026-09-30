@@ -102,6 +102,16 @@ local BackupSavePending = false
 local PollingIntervalSeconds : number? = nil
 local PollingJitterRatio = 0
 
+--[[
+	Hash of the last status snapshot this server applied, sent back as ?hash= so an unchanged
+	snapshot answers 304 with no body. Only set once a payload has been applied in full: holding the
+	hash for a snapshot we failed to apply would have the backend answer 304 about work never done.
+
+	The bootstrap hash is deliberately not reused here. Both endpoints hash their own payload, and
+	bootstrap carries the configuration documents that status leaves out, so the two never match.
+]]
+local LastStatusHash : string? = nil
+
 --= Public Variables =--
 
 --= Internal Functions =--
@@ -263,6 +273,9 @@ function Updater:ApplyBootstrap(bootstrap, init : boolean?)
 
 	self:ComposeAndApplyAll(init, oldPrivacyByConfigId)
 
+	-- Only now is every configuration in this payload composed and applied
+	InternalConfigs:SetReady()
+
 	self:QueueBackupSave()
 end
 
@@ -303,6 +316,15 @@ function Updater:ApplyStatus(status)
 
 		if not didSucceed or not configResp then
 			Utilities.GBWarn("Failed to fetch updated config:", configStatus.id)
+			continue
+		end
+
+		-- The hash is both this config's change-detection token and how GetConfigHashes lists it at
+		-- all; registering one without a hash would leave a config that is never recomposed, never
+		-- backed up and impossible to remove. The endpoint always sends one, so this is a guard
+		-- against a non-conforming response rather than an expected path.
+		if type(configResp.hash) ~= "string" then
+			Utilities.GBWarn("Config", configStatus.id, "was returned without a hash and was not applied.")
 			continue
 		end
 
@@ -472,9 +494,26 @@ function Updater:Init()
 				continue
 			end
 
-			local didSucceed, status = GBRequests:GBRequestAsync("v2/status")
-			if didSucceed and status then
-				self:ApplyStatus(status)
+			-- The hash of the snapshot we already hold goes back with the poll, so an unchanged one
+			-- answers 304 with no body and the steady-state poll costs a few bytes each way
+			local didSucceed, status, statusCode = GBRequests:GBRequestAsync("v2/status", {
+				hash = LastStatusHash,
+			})
+
+			if statusCode == 304 then
+				Utilities.GBLog("Status unchanged since the last poll")
+			elseif didSucceed and status then
+				-- Applied under pcall: an error in here used to kill this thread outright, leaving the
+				-- server silently frozen on its last known configs and experiments until it shut down
+				local didApply, applyError = pcall(self.ApplyStatus, self, status)
+
+				if didApply then
+					LastStatusHash = status.hash
+				else
+					-- Dropped so the next poll refetches the whole snapshot and tries again
+					LastStatusHash = nil
+					Utilities.GBWarn("Failed to apply the status poll:", applyError)
+				end
 			else
 				Utilities.GBLog("Status poll failed, retrying next interval")
 			end

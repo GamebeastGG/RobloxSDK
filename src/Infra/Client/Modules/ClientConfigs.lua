@@ -40,7 +40,11 @@ local ConfigReadySignal = Signal.new()
 local CachedConfigs = {}
 -- Consumer path identifiers (alias, name, or id) mapped to config ids
 local IdByIdentifier = {}
+-- The one identifier each config is listed under, mirroring the server's own keying
+local IdentifierByConfigId = {}
 local ConfigsReady = false
+-- Guards the re-pull below, so two events for unknown configs cannot race each other
+local IsRepullingConfigs = false
 
 --= Public Variables =--
 
@@ -62,10 +66,13 @@ local function ResolveConfigId(identifier : string) : number?
     return IdByIdentifier[tostring(identifier)]
 end
 
--- Returns every cached config document keyed by consumer identifier
+-- Returns every cached config document keyed by consumer identifier.
+-- Keyed off IdentifierByConfigId rather than IdByIdentifier: the latter resolves every spelling
+-- of a config (id, name and alias), which listed the same document up to three times here while
+-- the server's equivalent listed it once.
 local function GetAllViews()
     local views = {}
-    for identifier, configId in IdByIdentifier do
+    for configId, identifier in IdentifierByConfigId do
         views[identifier] = CachedConfigs[tostring(configId)]
     end
     return views
@@ -176,10 +183,30 @@ function ClientConfigs:Init()
 
         -- Unknown config (e.g. created after join): re-pull the full payload instead of patching
         if config == nil then
+            if IsRepullingConfigs then
+                return
+            end
+            IsRepullingConfigs = true
+
             task.spawn(function()
-                local payload = GetConfigRemoteFunc:InvokeServer()
+                local didSucceed, payload = pcall(function()
+                    return GetConfigRemoteFunc:InvokeServer()
+                end)
+
+                IsRepullingConfigs = false
+
+                if not didSucceed or not payload then
+                    return
+                end
+
                 CachedConfigs = payload.configs
                 IdByIdentifier = payload.idByIdentifier
+                IdentifierByConfigId = payload.identifierByConfigId
+
+                -- OnChanged and Observe resolve their identifier when fired, so they support
+                -- subscribing to a config that does not exist yet. Without this they never heard
+                -- about the config they were waiting for.
+                ConfigUpdatedSignal:Fire(configId, changes, nil)
             end)
             return
         end
@@ -205,6 +232,7 @@ function ClientConfigs:Init()
         --TODO: Make sure we actually got something
         CachedConfigs = payload.configs
         IdByIdentifier = payload.idByIdentifier
+        IdentifierByConfigId = payload.identifierByConfigId
         ConfigsReady = true
         ConfigReadySignal:Fire(GetAllViews())
     end)

@@ -205,6 +205,20 @@ function ExperimentCatalog:GetMetadata(experimentId: number, groupId: number): {
 end
 
 --[[
+	Keeps only the experiments that are actually in the catalog, so a changeset fetch that failed
+	is not reported to the caller as a started experiment.
+]]
+local function filterToCatalogued(experimentIds: { number }): { number }
+	local catalogued = {}
+	for _, experimentId in experimentIds do
+		if Catalog[experimentId] then
+			table.insert(catalogued, experimentId)
+		end
+	end
+	return catalogued
+end
+
+--[[
 	Reconciles the catalog against a bootstrap/status payload: refreshes metadata,
 	removes stopped experiments, and fetches changesets for anything new.
 
@@ -254,9 +268,15 @@ function ExperimentCatalog:Update(experiments: ExperimentsByUnitType, requiredPr
 	end
 
 	-- Remove stopped experiments
-	for experimentId in Catalog do
+	for experimentId, state in Catalog do
 		if not seenExperimentIds[experimentId] then
 			Utilities.GBLog("Experiment stopped:", experimentId)
+
+			-- The active-catalog hash is only a 304 token for what this server has cached, so it has
+			-- to go with the cache. Kept, it lets a later refetch for a re-appearing experiment be
+			-- answered 304, which would leave that experiment with no changesets for good.
+			ActiveHashByUnitType[state.meta.unitType] = nil
+
 			Catalog[experimentId] = nil
 			table.insert(summary.removedExperimentIds, experimentId)
 		end
@@ -266,6 +286,13 @@ function ExperimentCatalog:Update(experiments: ExperimentsByUnitType, requiredPr
 	for unitType in unitTypesNeedingFetch do
 		fetchActiveChangesets(unitType :: "user" | "server")
 	end
+
+	-- A fetch that failed leaves its experiments out of the catalog. Reporting them as started
+	-- anyway had the caller re-assign every player in the server on every poll, for experiments it
+	-- still had no changesets to apply. They stay uncatalogued, so the next poll sees them as new
+	-- again and retries the fetch.
+	summary.newUserExperimentIds = filterToCatalogued(summary.newUserExperimentIds)
+	summary.newServerExperimentIds = filterToCatalogued(summary.newServerExperimentIds)
 
 	return summary
 end

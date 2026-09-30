@@ -152,6 +152,14 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 			break
 		end
 
+		-- Nothing private can be left inside a value that is not a table. A change that removes a
+		-- key sitting above a privacy path arrives carrying no value at all, so there is nothing to
+		-- scrub; descending into it raised "attempt to index nil" and, with no pcall around the poll
+		-- loop, took status polling down with it for the rest of the server's life.
+		if type(configCopy) ~= "table" then
+			continue
+		end
+
 		local target = configCopy
 		for index, pathSegment in targetPath do
 			if index == #targetPath then
@@ -160,7 +168,9 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 			else
 				target = target[pathSegment]
 
-				if target == nil then
+				-- Covers a scalar as well as a missing key: either way the privacy path runs deeper
+				-- than the document does, so there is nothing there to remove
+				if type(target) ~= "table" then
 					Utilities.GBWarn("Privacy path ".. table.concat(targetPath, ".").. " does not exist in config.")
 					break
 				end
@@ -222,6 +232,25 @@ function InternalConfigs:OnReady(callback : (newConfigs : any) -> ()) : RBXScrip
 		task.spawn(callback, self:GetAll(nil))
 		return SignalConnection.new()
 	end
+end
+
+--[[
+	Marks the config store ready and releases everything waiting on it, once. The composer calls
+	this after applying every configuration from a bootstrap payload.
+
+	Readiness is deliberately not set per config. ApplyConfigs runs once per configuration, so
+	flipping the flag there released consumers, and fired every OnReady callback, as soon as the
+	first one was applied: Configs:Get on any later configuration then read a nil view. An app with
+	no configurations at all never became ready under that rule either, which the v2 backend treats
+	as a legitimate state.
+]]
+function InternalConfigs:SetReady()
+	if ConfigsReady then
+		return
+	end
+
+	ConfigsReady = true
+	ConfigReadySignal:Fire(self:GetAll(nil))
 end
 
 function InternalConfigs:WaitForConfigsReady() : true
@@ -541,10 +570,6 @@ function InternalConfigs:ApplyConfigs(player: Player?, configId : number, newVie
 			end
 		end
 	end
-
-	ConfigsReady = true
-
-	ConfigReadySignal:Fire(self:GetAll(nil))
 end
 
 -- Get the value of a specific config. The first path segment identifies the config
@@ -608,13 +633,19 @@ function InternalConfigs:Init()
 		self:WaitForConfigsReady()
 
 		local configs = {}
+		-- The single identifier each config is keyed by for consumers. ConfigIdByIdentifier holds
+		-- every spelling (id, name and alias all resolve), so a client keying its own payload off it
+		-- listed the same document up to three times where the server listed it once.
+		local identifierByConfigId = {}
 		for configId, entry in ActiveConfigs do
 			local view = entry.viewByPlayer[player] or entry.serverView
 			configs[tostring(configId)] = FilterConfigForClient({}, view, entry.privacy)
+			identifierByConfigId[tostring(configId)] = GetIdentifierForEntry(entry)
 		end
 
 		return {
 			idByIdentifier = ConfigIdByIdentifier,
+			identifierByConfigId = identifierByConfigId,
 			configs = configs,
 		}
 	end

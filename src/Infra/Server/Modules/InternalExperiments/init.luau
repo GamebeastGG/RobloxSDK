@@ -63,6 +63,14 @@ local BULK_ASSIGNMENT_SECONDS_TO_DEFER = 1
 local SERVER_ASSIGNMENT_RETRY_DELAY = 10
 
 --[[
+	How long to wait before retrying a failed bulk assignment request. The ordinary defer is a
+	second, which is right for batching up joins but turns into one request per second per server
+	for as long as the backend is unhealthy, so a failure backs off to the same delay the
+	server-unit path uses.
+]]
+local USER_ASSIGNMENT_RETRY_DELAY = 10
+
+--[[
 	Maximum units per bulk assignment request, enforced by the backend.
 ]]
 local MAX_BULK_ASSIGNMENT_UNITS = 250
@@ -130,7 +138,7 @@ local executeUserAssignmentRequest -- Forward declaration for queueAssignment
 --[[
 	Queues players to be assigned to experiments in bulk.
 ]]
-local function queueAssignment(players: { Player })
+local function queueAssignment(players: { Player }, deferSeconds: number?)
 	local assignmentState = currentAssignmentState
 	assert(assignmentState, "Assignment has not been started")
 
@@ -140,7 +148,7 @@ local function queueAssignment(players: { Player })
 
 	-- Start timer for deferred bulk assignment
 	if not assignmentState.deferredBulkAssignmentThread then
-		assignmentState.deferredBulkAssignmentThread = task.delay(BULK_ASSIGNMENT_SECONDS_TO_DEFER, function()
+		assignmentState.deferredBulkAssignmentThread = task.delay(deferSeconds or BULK_ASSIGNMENT_SECONDS_TO_DEFER, function()
 			assignmentState.deferredBulkAssignmentThread = nil
 			executeUserAssignmentRequest()
 		end)
@@ -214,7 +222,7 @@ function executeUserAssignmentRequest()
 				end
 			end
 			if #playersToRequeue > 0 then
-				queueAssignment(playersToRequeue)
+				queueAssignment(playersToRequeue, USER_ASSIGNMENT_RETRY_DELAY)
 			end
 
 			continue
@@ -337,6 +345,10 @@ local function disableAssignment()
 
 	currentAssignmentState = nil
 	table.clear(resolvedPlayerSet)
+	-- No user experiments are running, so these records mean nothing now. Left in place they pin a
+	-- Player for every player who was in the server when assignment stopped, and the leave
+	-- listener that would have cleared them has just been disconnected.
+	table.clear(Experiments.AssignmentsByPlayer)
 
 	Utilities.GBLog("Stopped requesting experiment assignment")
 end
