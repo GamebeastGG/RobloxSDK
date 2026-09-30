@@ -46,7 +46,16 @@ Values must be strings, numbers, booleans, or lists of those (up to 100 items). 
 
 Relevant `sdkSettings`:
 - `markerFlushRate` — seconds between engagement marker batch flushes (default 10).
-- `statusPollRate` — seconds between change-detection polls (default 30).
+- `statusPollRate` — seconds between change-detection polls (default 30). It acts as a floor: Gamebeast can ask servers to poll less often than this, to shed load, but never more often, and spreads their polls over a jitter window so servers don't all poll on the same tick.
+
+## Changing settings at runtime
+The `sdkSettings` passed to `Setup` can be changed on a running SDK with `UpdateSettings`. Settings left out of the table keep their current value, and nothing is applied unless every setting given is valid:
+
+```lua
+Gamebeast:UpdateSettings({ statusPollRate = 120, sdkDebugEnabled = true })
+```
+
+Changes take effect from the next use — the status poll and marker flush loops pick theirs up within a few seconds. `environment` and `customUrl` are the exception and can only be set in `Setup`: they decide which backend the SDK talks to, and swapping that mid-session would leave the configs, experiments and datastore backup already loaded keyed to the environment they came from.
 
 ## Installation
 To get started with Gamebeast, sign up at https://dashboard.gamebeast.gg/
@@ -54,3 +63,6 @@ To get started with Gamebeast, sign up at https://dashboard.gamebeast.gg/
 Gamebeast can be installed directly to Roblox Studio through our Roblox Plugin, or via Roblox focused package managers such as Wally. 
 
 Please visit https://docs.gamebeast.gg/Roblox/Installation for more details.
+
+## Running the tests
+Tests live in `tests/` and run under [TestEZ](https://github.com/Roblox/testez) inside Studio. TestEZ is a dev dependency managed by [Forest](https://forest.dev/), mounted at `tests/DevPackages`, so install it once with `forest install` and sync the place with Rojo (`rojo serve`, using the default project). Then press play, switch to the server context, and set the `RunServerTest` or `RunClientTest` attribute on `TestRunnerRemote` in ReplicatedStorage to run them.

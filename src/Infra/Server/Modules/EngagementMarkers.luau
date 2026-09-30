@@ -107,9 +107,12 @@ end
 local function AddMarker(marker)
 	table.insert(MarkerQueue, marker)
 	
-	-- If marker queue size limit reached then send batch
+	-- If marker queue size limit reached then send batch. Spawned because markers are added from
+	-- threads that must not yield, including the shutdown flush.
 	if #MarkerQueue >= MAX_EVENT_QUEUE_SIZE then
-		EngagementMarkers:SendMarkers()
+		task.spawn(function()
+			EngagementMarkers:SendMarkers()
+		end)
 	end
 end
 
@@ -253,8 +256,8 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			["inputType"] = nil, -- Resolved later
 			["deeplinkData"] = nil, -- Resolved later
 			["position"] = position ~= nil and EncodeVector3(position) or nil,
-			["language"] = player and LocalizationCache:GetLocaleId(player) or nil,
-			["country"] = player and LocalizationCache:GetRegionId(player) or nil,
+			["language"] = nil, -- Resolved later
+			["country"] = nil, -- Resolved later
 		},
 	}
 
@@ -353,16 +356,18 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 		local dataFetchTimer = Timer.new(CLIENT_DATA_TIMEOUT)
 		pendingMarkerData.pendingCleaner:Add(dataFetchTimer)
 		pendingMarkerData.pendingCleaner:Add(dataFetchTimer:OnEnd(function()
-			if not pendingMarkerData.tasks["clientInfo"] then
-				return
+			if pendingMarkerData.tasks["clientInfo"] then
+				if not ServerClientInfoHandler:IsClientInfoResolved(player) and ClientInfoWarned == false then
+					Utilities.GBWarn("Failed to resolve client info, did you forget to :Setup() Gamebeast SDK on the client?")
+					ClientInfoWarned = true
+				end
+
+				completeTask("clientInfo")
 			end
 
-			if not ServerClientInfoHandler:IsClientInfoResolved(player) and ClientInfoWarned == false then
-				Utilities.GBWarn("Failed to resolve client info, did you forget to :Setup() Gamebeast SDK on the client?")
-				ClientInfoWarned = true
-			end
-
-			completeTask("clientInfo")
+			-- Send the marker without localization rather than hold it until shutdown, in case an
+			-- engine lookup never came back
+			completeTask("localization")
 		end))
 
 		-- Ensure marker gets fired with device info on timeout or bind to close
@@ -380,6 +385,15 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			end
 
 			completeTask("launchData")
+		end))
+
+		-- Localization comes from engine lookups that yield, so the marker waits on them here
+		-- rather than in the caller's thread
+		addTask("localization", LocalizationCache:OnResolved(player, function(localization)
+			entry.properties.language = localization.localeId
+			entry.properties.country = localization.regionId
+
+			completeTask("localization")
 		end))
 
 		-- Experiment attribution is stamped by the backend at ingestion from the player's

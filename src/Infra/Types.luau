@@ -12,12 +12,25 @@ type SDKSettings = {
 	environment : string | nil,
 	-- Seconds between engagement marker batch flushes to the backend.
 	markerFlushRate : number,
-	-- Seconds between status polls checking for configuration and experiment changes.
+	-- Seconds between status polls checking for configuration and experiment changes. Acts as a
+	-- floor: Gamebeast can ask servers to poll less often than this, never more often.
 	statusPollRate : number
 }
 export type ServerSetupConfig = {
 	key : string | Secret,
 	sdkSettings : SDKSettings?
+}
+
+-- The settings Gamebeast:UpdateSettings can change on a running SDK, all optional: the ones left out
+-- keep their current value. `environment` and `customUrl` are absent because they are fixed once the
+-- SDK is set up; retargeting the backend mid-session would leave everything already loaded, configs,
+-- experiments and the datastore backup, keyed to the environment it came from.
+export type RuntimeSDKSettings = {
+	sdkWarningsEnabled : boolean?,
+	includeWarningStackTrace : boolean?,
+	sdkDebugEnabled : boolean?,
+	markerFlushRate : number?,
+	statusPollRate : number?
 }
 
 --NOTE: The actual JSON type doesnt get represented cleanly in Roblox's intellesense. This is a simplified version for now.

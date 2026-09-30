@@ -29,7 +29,7 @@ local TestsFolder = ReplicatedFirst:WaitForChild("Tests")
 
 --= Dependencies =--
 
-local TestEZ = require(TestsFolder:WaitForChild("testez"))
+local TestEZ = require(TestsFolder:WaitForChild("DevPackages"):WaitForChild("testez"))
 
 --= Variables =--
 

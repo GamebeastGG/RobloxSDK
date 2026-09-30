@@ -35,6 +35,17 @@ local DatatstoreBackup = shared.GBMod("DatastoreBackup") ---@module DatastoreBac
 
 --= Types =--
 
+--[[
+	The polling object returned by the bootstrap and status endpoints: the backend's control over how
+	often servers poll, so requests can be shed globally without shipping an SDK update.
+]]
+type PollingDirective = {
+	-- Seconds between status polls. Absent leaves servers on their statusPollRate setting.
+	intervalSeconds : number?,
+	-- Fraction of the interval to spread polls over, so servers don't line up on the same tick.
+	jitterRatio : number?,
+}
+
 --= Constants =--
 
 --[[
@@ -63,6 +74,19 @@ local CONNECTION_RETRY_DELAY = 10
 ]]
 local BACKUP_SCHEMA_VERSION = 2
 
+--[[
+	How often the status poll loop re-derives how long it should be waiting. Keeps a lowered
+	statusPollRate, or a lifted backend directive, from taking a whole long interval to be noticed.
+]]
+local POLL_RECHECK_INTERVAL = 5
+
+--[[
+	The largest jitter ratio a backend directive can ask for. A ratio spreads polls over
+	`intervalSeconds * ratio`, so anything beyond 1 would stretch the wait past twice the interval,
+	which is a decision for intervalSeconds to make, not jitter.
+]]
+local MAX_POLL_JITTER_RATIO = 1
+
 --= Object References =--
 
 local PrimaryBackup = DatatstoreBackup.new(RunService:IsStudio())
@@ -70,6 +94,13 @@ local PrimaryBackup = DatatstoreBackup.new(RunService:IsStudio())
 --= Variables =--
 
 local BackupSavePending = false
+
+--[[
+	Latest polling directive from the backend, as given. The statusPollRate floor is applied per poll
+	in GetPollDelay rather than here, so it keeps up with the setting being changed at runtime.
+]]
+local PollingIntervalSeconds : number? = nil
+local PollingJitterRatio = 0
 
 --= Public Variables =--
 
@@ -83,7 +114,62 @@ local function GetBackupKey() : string
 	return "Configs_".. environment
 end
 
+local function IsFiniteNumber(value : any) : boolean
+	return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
+end
+
 --= API Functions =--
+
+--[[
+	Stores the polling object from a bootstrap or status response, dropping anything malformed.
+
+	It is the backend's lever for shedding load, so it can only ever slow polling down: an
+	`intervalSeconds` under the statusPollRate setting is ignored without warning the developer, which
+	keeps a mistaken deploy (an interval of 0.01) from turning every server into a request flood.
+]]
+function Updater:SetPollingDirective(polling : PollingDirective?)
+	if polling ~= nil and type(polling) ~= "table" then
+		Utilities.GBLog("Ignoring malformed polling directive:", polling)
+		polling = nil
+	end
+
+	local intervalSeconds = polling and polling.intervalSeconds
+	if intervalSeconds ~= nil and not IsFiniteNumber(intervalSeconds) then
+		Utilities.GBLog("Ignoring non-numeric poll interval from the backend:", intervalSeconds)
+		intervalSeconds = nil
+	end
+
+	local jitterRatio = polling and polling.jitterRatio
+	if jitterRatio ~= nil and not (IsFiniteNumber(jitterRatio) and jitterRatio >= 0 and jitterRatio <= MAX_POLL_JITTER_RATIO) then
+		Utilities.GBLog(`Ignoring poll jitter ratio of {jitterRatio}, expected a number between 0 and {MAX_POLL_JITTER_RATIO}`)
+		jitterRatio = nil
+	end
+
+	PollingIntervalSeconds = intervalSeconds
+	PollingJitterRatio = jitterRatio or 0
+
+	local pollRateSetting = DataCache:Get("Settings").statusPollRate
+	if intervalSeconds and intervalSeconds < pollRateSetting then
+		Utilities.GBLog(`Backend asked for a {intervalSeconds}s poll interval, under the statusPollRate setting of {pollRateSetting}s; staying on the setting`)
+	end
+end
+
+--[[
+	How long to wait before the next status poll: the longer of the statusPollRate setting and the
+	backend's interval, spread over the jitter the backend asked for.
+
+	Jitter only ever adds, so a poll never lands sooner than the interval in force allows.
+	`jitterRoll` is the 0-1 position within the jitter window, rolled once per poll by the caller so a
+	wait that is re-derived mid-flight doesn't re-roll into a shorter one.
+]]
+function Updater:GetPollDelay(jitterRoll : number?) : number
+	local interval = DataCache:Get("Settings").statusPollRate
+	if PollingIntervalSeconds and PollingIntervalSeconds > interval then
+		interval = PollingIntervalSeconds
+	end
+
+	return interval * (1 + (jitterRoll or math.random()) * PollingJitterRatio)
+end
 
 -- Composes and applies the evaluated views for a single config: the server view,
 -- plus per-player views for players with experiment overlays.
@@ -134,6 +220,8 @@ end
 -- Applies a full bootstrap payload: registers configs, reconciles experiments
 -- (bounded by the initial assignment wait), then composes and applies all views.
 function Updater:ApplyBootstrap(bootstrap, init : boolean?)
+	self:SetPollingDirective(bootstrap.polling)
+
 	-- Register config base documents, keeping old privacy for transition diffing
 	local oldPrivacyByConfigId = {}
 	local seenConfigIds = {}
@@ -181,6 +269,9 @@ end
 -- Applies a status poll payload: refetches configs whose hash changed, removes
 -- configs that disappeared, and reconciles the experiment catalog.
 function Updater:ApplyStatus(status)
+	-- Read before the refetches below, so a directive shedding load still lands if they fail
+	self:SetPollingDirective(status.polling)
+
 	local knownHashes = InternalConfigs:GetConfigHashes()
 	local seenConfigIds = {}
 
@@ -369,16 +460,29 @@ function Updater:Init()
 
 	-- Poll the status endpoint for configuration and experiment changes
 	task.spawn(function()
-		while true do
-			task.wait(DataCache:Get("Settings").statusPollRate)
+		local lastPollTime = tick()
+		local jitterRoll = math.random()
 
-			local didSucceed, status = GBRequests:GBRequestAsync("v2/status")
-			if not didSucceed or not status then
-				Utilities.GBLog("Status poll failed, retrying next interval")
+		while true do
+			local remaining = self:GetPollDelay(jitterRoll) - (tick() - lastPollTime)
+			if remaining > 0 then
+				-- Capped so a settings change or a new directive is picked up within
+				-- POLL_RECHECK_INTERVAL instead of at the end of a long wait
+				task.wait(math.min(remaining, POLL_RECHECK_INTERVAL))
 				continue
 			end
 
-			self:ApplyStatus(status)
+			local didSucceed, status = GBRequests:GBRequestAsync("v2/status")
+			if didSucceed and status then
+				self:ApplyStatus(status)
+			else
+				Utilities.GBLog("Status poll failed, retrying next interval")
+			end
+
+			-- Timed from the end of the cycle, so a slow or failed poll can never tighten the
+			-- cadence the interval asked for
+			lastPollTime = tick()
+			jitterRoll = math.random()
 		end
 	end)
 end

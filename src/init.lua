@@ -25,6 +25,7 @@ local Types = require(script.Infra.Types)
 
 export type ServerSetupConfig = Types.ServerSetupConfig
 export type JSON = Types.JSON
+export type RuntimeSDKSettings = Types.RuntimeSDKSettings
 
 -- Services
 export type ConfigsService = Types.ConfigsService
@@ -94,6 +95,15 @@ local DEFAULT_SETTINGS = {
 		end
 	},
 }
+
+-- Settings :UpdateSettings() refuses, because they decide which backend the SDK talks to: swapping
+-- that mid-session would leave the configs, experiments and datastore backup it has already loaded
+-- keyed to the environment they came from.
+local SETUP_ONLY_SETTINGS = {
+	customUrl = true,
+	environment = true,
+}
+
 --= Object References =--
 
 --= Variables =--
@@ -102,9 +112,22 @@ local Modules = {} :: { [string] : ModuleData }
 local PublicModules = {} :: { [string] : ModuleData }
 local Initializing = false
 local DidRequire = false
+local DidSetup = false
 local IsServer = RunService:IsServer()
 
 --= Internal Functions =--
+
+local function ValidateSetting(key : string, value : any)
+	local settingData = DEFAULT_SETTINGS[key]
+	if not settingData then
+		error(`"{key}" is not a Gamebeast SDK setting.`, 3)
+	end
+
+	local isValid, reason = settingData.validator(value)
+	if isValid == false then
+		error(`The value of the Gamebeast SDK setting "{key}" is invalid.{reason and " " .. reason or ""}`, 3)
+	end
+end
 
 local function RequireModule(moduleData : ModuleData)
 	if moduleData.Loaded then
@@ -282,10 +305,8 @@ function Gamebeast:Setup(setupConfig : ServerSetupConfig?)
 		if sdkSettings[key] == nil then
 			sdkSettings[key] = settingData.value
 		end
-		
-		if settingData.validator(sdkSettings[key]) == false then 
-			error(`The value of the Gamebeast SDK setting "{key}" is invalid.`, 2)
-		end
+
+		ValidateSetting(key, sdkSettings[key])
 	end
 
 	StartSDK()
@@ -293,6 +314,37 @@ function Gamebeast:Setup(setupConfig : ServerSetupConfig?)
 	local dataCacheModule = RequireModule(GetModule("DataCache"))
 	dataCacheModule:Set("Key", setupConfig.key)
 	dataCacheModule:Set("Settings", sdkSettings)
+
+	DidSetup = true
+end
+
+--[[
+	Changes SDK settings on a running SDK. Settings left out of the table keep their current value, and
+	nothing is applied unless every setting given is valid.
+
+	The SDK reads settings as it needs them rather than holding onto them, so a change takes effect
+	from the next use: the status poll and marker flush loops pick theirs up within a few seconds.
+
+	`environment` and `customUrl` are refused here; they are only set in :Setup().
+]]
+function Gamebeast:UpdateSettings(sdkSettings : RuntimeSDKSettings)
+	assert(type(sdkSettings) == "table", "Gamebeast:UpdateSettings expects a table of settings.")
+	assert(DidSetup, "Gamebeast:UpdateSettings can only be used after Gamebeast:Setup().")
+
+	-- Validated up front, so a bad value leaves the settings it was sent with untouched
+	for key, value in sdkSettings do
+		if SETUP_ONLY_SETTINGS[key] then
+			error(`The Gamebeast SDK setting "{key}" can only be set in Gamebeast:Setup().`, 2)
+		end
+
+		ValidateSetting(key, value)
+	end
+
+	-- Written into the live table rather than replacing it, since the SDK reads fields off it
+	local settings = RequireModule(GetModule("DataCache")):Get("Settings")
+	for key, value in sdkSettings do
+		settings[key] = value
+	end
 end
 
 --= Initializers =--

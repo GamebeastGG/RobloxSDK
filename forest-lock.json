@@ -1,0 +1,20 @@
+{
+  "file_version": 2,
+  "mounts": {
+    "tests/DevPackages": {
+      "packages": {
+        "roblox/testez": [
+          {
+            "dependencies": {},
+            "integrity": "ac6f165d6fded5da2d98a3e04724b3fbee589e79c9968d4a63c727dc280aa489",
+            "location": "~",
+            "public": true,
+            "root": "src/init.lua",
+            "version": "0.4.1"
+          }
+        ]
+      }
+    }
+  },
+  "packages": {}
+}
