@@ -95,6 +95,10 @@ return function()
             expect(context.roblox).never.to.be.ok()
         end)
 
+        it("should gather nothing for paths the shared context or the backend covers", function()
+            expect(AssignmentContext:GetForServer({ "roblox.placeId", "roblox.placeVersion", "unit.distinctId" })).never.to.be.ok()
+        end)
+
         it("should include properties in the shared context", function()
             local shared = AssignmentContext:GetShared()
             expect(shared.schemaVersion).to.equal(1)
@@ -141,6 +145,26 @@ return function()
             local contextByPlayerId = AssignmentContext:GetForPlayers({ player.UserId }, {})
             expect(contextByPlayerId[player.UserId]).to.be.ok()
             expect(contextByPlayerId[player.UserId].properties.vip).to.equal(true)
+        end)
+
+        -- Targeting names what it reads by context path; this is the shape the backend sends
+        it("should gather standard properties named by their context path", function()
+            local contextByPlayerId = AssignmentContext:GetForPlayers({ player.UserId }, { "roblox.country", "roblox.language" })
+            local context = contextByPlayerId[player.UserId]
+            expect(context).to.be.ok()
+            expect(context.roblox).to.be.ok()
+            expect(type(context.roblox.country)).to.equal("string")
+            expect(type(context.roblox.language)).to.equal("string")
+        end)
+
+        it("should not treat a bare property name as a standard property", function()
+            local contextByPlayerId = AssignmentContext:GetForPlayers({ player.UserId }, { "country" })
+            expect(contextByPlayerId[player.UserId]).never.to.be.ok()
+        end)
+
+        it("should gather nothing per player for paths the shared context or the backend covers", function()
+            local contextByPlayerId = AssignmentContext:GetForPlayers({ player.UserId }, { "roblox.placeId", "unit.isNewUser" })
+            expect(contextByPlayerId[player.UserId]).never.to.be.ok()
         end)
 
         it("should omit players without any context", function()

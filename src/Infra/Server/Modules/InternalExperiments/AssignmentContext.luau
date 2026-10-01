@@ -100,6 +100,24 @@ local PLAYER_PROPERTY_GETTERS: { [string]: (player: Player) -> any } = {
 ]]
 local SERVER_PROPERTY_GETTERS: { [string]: () -> any } = {}
 
+--[[
+	Standard properties every request already carries in its shared context (see GetShared), so
+	targeting on them needs nothing gathered per unit.
+]]
+local SHARED_ROBLOX_PROPERTIES: { [string]: true } = {
+	placeId = true,
+	placeVersion = true,
+}
+
+--[[
+	The context namespaces a required property can be read from. Targeting names each property by
+	its full context path (`roblox.inputType`, `properties.accountTier`), and the namespace decides
+	where the SDK finds the value. `unit.*` paths (`unit.isNewUser`) are resolved by the backend
+	from the unit itself, so the SDK has nothing to send for them.
+]]
+local ROBLOX_NAMESPACE = "roblox"
+local PROPERTIES_NAMESPACE = "properties"
+
 --= Variables =--
 
 --[[
@@ -124,6 +142,19 @@ local function runBounded(callbacks: { () -> () })
 			task.wait(MAX_CALLBACK_DURATION)
 		end,
 	})
+end
+
+--[[
+	Splits a required property path into its context namespace and the key within it, e.g.
+	`roblox.inputType` into "roblox" and "inputType". Only the first dot separates them, since a
+	developer-defined property key may contain dots of its own.
+]]
+local function splitPropertyPath(path: string): (string?, string)
+	local namespace, key = string.match(path, "^([^%.]+)%.(.+)$")
+	if not namespace or not key then
+		return nil, path
+	end
+	return namespace, key
 end
 
 local function isScalar(value: any): boolean
@@ -347,14 +378,23 @@ function AssignmentContext:GetForPlayers(playerIds: { number }, requiredProperti
 		robloxContextByPlayerId[playerId] = robloxContext
 
 		local playerProperties = PropertiesByPlayer[player]
-		for _, property in requiredProperties do
-			local getter = PLAYER_PROPERTY_GETTERS[property]
-			if getter then
-				table.insert(retrievalCallbacks, function()
-					robloxContext[property] = getter(player)
-				end)
-			elseif not playerProperties or playerProperties[property] == nil then
-				Utilities.GBLog(`Experiment targeting requires property "{property}" which is not set for player {playerId}`)
+		for _, path in requiredProperties do
+			local namespace, key = splitPropertyPath(path)
+
+			if namespace == ROBLOX_NAMESPACE then
+				local getter = PLAYER_PROPERTY_GETTERS[key]
+				if getter then
+					table.insert(retrievalCallbacks, function()
+						robloxContext[key] = getter(player)
+					end)
+				elseif not SHARED_ROBLOX_PROPERTIES[key] then
+					Utilities.GBLog(`Experiment targeting requires "{path}", which this SDK does not report for players`)
+				end
+			elseif namespace == PROPERTIES_NAMESPACE then
+				-- Server properties travel as shared context, so they cover a player who has no value of their own
+				if (not playerProperties or playerProperties[key] == nil) and ServerProperties[key] == nil then
+					Utilities.GBLog(`Experiment targeting requires property "{key}" which is not set for player {playerId}`)
+				end
 			end
 		end
 	end
@@ -384,14 +424,20 @@ function AssignmentContext:GetForServer(requiredProperties: { string }): Context
 	local robloxContext: { [string]: any } = {}
 	local retrievalCallbacks: { () -> () } = {}
 
-	for _, property in requiredProperties do
-		local getter = SERVER_PROPERTY_GETTERS[property]
-		if getter then
-			table.insert(retrievalCallbacks, function()
-				robloxContext[property] = getter()
-			end)
-		elseif ServerProperties[property] == nil then
-			Utilities.GBLog(`Experiment targeting requires server property "{property}" which is not set`)
+	for _, path in requiredProperties do
+		local namespace, key = splitPropertyPath(path)
+
+		if namespace == ROBLOX_NAMESPACE then
+			local getter = SERVER_PROPERTY_GETTERS[key]
+			if getter then
+				table.insert(retrievalCallbacks, function()
+					robloxContext[key] = getter()
+				end)
+			elseif not SHARED_ROBLOX_PROPERTIES[key] then
+				Utilities.GBLog(`Experiment targeting requires "{path}", which this SDK does not report for servers`)
+			end
+		elseif namespace == PROPERTIES_NAMESPACE and ServerProperties[key] == nil then
+			Utilities.GBLog(`Experiment targeting requires server property "{key}" which is not set`)
 		end
 	end
 
