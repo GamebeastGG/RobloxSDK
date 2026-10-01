@@ -94,6 +94,12 @@ local DEFAULT_SETTINGS = {
 			return type(val) == "number" and val >= 5
 		end
 	},
+	assignmentRefreshRate = {
+		value = 30,
+		validator = function(val)
+			return type(val) == "number" and val >= 10
+		end
+	},
 }
 
 -- Settings :UpdateSettings() refuses, because they decide which backend the SDK talks to: swapping
@@ -323,7 +329,7 @@ end
 	nothing is applied unless every setting given is valid.
 
 	The SDK reads settings as it needs them rather than holding onto them, so a change takes effect
-	from the next use: the status poll and marker flush loops pick theirs up within a few seconds.
+	from the next use: the status poll, assignment refresh and marker flush loops pick theirs up within a few seconds.
 
 	`environment` and `customUrl` are refused here; they are only set in :Setup().
 ]]

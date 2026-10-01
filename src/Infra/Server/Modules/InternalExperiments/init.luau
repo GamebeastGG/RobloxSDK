@@ -28,6 +28,7 @@ local Players = game:GetService("Players")
 --= Dependencies =--
 
 local GBRequests = shared.GBMod("GBRequests")
+local DataCache = shared.GBMod("DataCache")
 local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal)
 local Utilities = shared.GBMod("Utilities")
 local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
@@ -75,7 +76,18 @@ local USER_ASSIGNMENT_RETRY_DELAY = 10
 ]]
 local MAX_BULK_ASSIGNMENT_UNITS = 250
 
+--[[
+	How often the assignment refresh loop re-derives how long it should be waiting, so a lowered
+	assignmentRefreshRate is picked up without sitting out a whole long interval first.
+]]
+local ASSIGNMENT_REFRESH_RECHECK_INTERVAL = 5
+
 --= Variables =--
+
+--[[
+	Whether the loop re-requesting assignments every assignmentRefreshRate seconds is running.
+]]
+local assignmentRefreshStarted = false
 
 --[[
 	Pending debounced re-assignment after developer-defined properties changed.
@@ -300,6 +312,51 @@ local function executeServerAssignmentRequest()
 end
 
 --[[
+	Re-requests the assignments of every player in the server, and of the server itself, every
+	assignmentRefreshRate seconds.
+
+	This is the only way an assignment changed on the dashboard (a manual reassignment, an unenroll)
+	reaches a live server: the status snapshot moves when an experiment's definition does, not when
+	one unit's assignment does, so without it the change waits for the player to rejoin. Repeating
+	the request is harmless, since an unchanged assignment resolves to the same group and the backend
+	records its exposure once per assignment version.
+
+	Started from the first catalog update rather than Init, so the settings are known to be set.
+]]
+local function startAssignmentRefresh()
+	if assignmentRefreshStarted then
+		return
+	end
+	assignmentRefreshStarted = true
+
+	task.spawn(function()
+		local lastRefreshTime = tick()
+
+		while true do
+			local remaining = DataCache:Get("Settings").assignmentRefreshRate - (tick() - lastRefreshTime)
+			if remaining > 0 then
+				task.wait(math.min(remaining, ASSIGNMENT_REFRESH_RECHECK_INTERVAL))
+				continue
+			end
+
+			lastRefreshTime = tick()
+
+			if currentAssignmentState then
+				local players = Players:GetPlayers()
+				if #players > 0 then
+					queueAssignment(players)
+				end
+			end
+
+			-- A pending retry is already about to re-request the server's assignment
+			if ExperimentCatalog:GetUnitTypeCount("server") > 0 and not serverAssignmentRetryPending then
+				task.spawn(executeServerAssignmentRequest)
+			end
+		end
+	end)
+end
+
+--[[
 	Starts requesting experiment assignments for players.
 	Called when the catalog first contains user-unit experiments.
 ]]
@@ -433,6 +490,8 @@ end
 	@canyield
 ]]
 function Experiments:UpdateCatalog(experiments: ExperimentsByUnitType, requiredProperties: { string }?)
+	startAssignmentRefresh()
+
 	local summary = ExperimentCatalog:Update(experiments, requiredProperties)
 
 	-- Strip assignments for stopped experiments

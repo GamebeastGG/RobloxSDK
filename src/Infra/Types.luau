@@ -14,7 +14,10 @@ type SDKSettings = {
 	markerFlushRate : number,
 	-- Seconds between status polls checking for configuration and experiment changes. Acts as a
 	-- floor: Gamebeast can ask servers to poll less often than this, never more often.
-	statusPollRate : number
+	statusPollRate : number,
+	-- Seconds between re-requesting experiment assignments for the players in the server and the
+	-- server itself, which is how assignment changes made on the dashboard reach a live server.
+	assignmentRefreshRate : number
 }
 export type ServerSetupConfig = {
 	key : string | Secret,
@@ -30,7 +33,8 @@ export type RuntimeSDKSettings = {
 	includeWarningStackTrace : boolean?,
 	sdkDebugEnabled : boolean?,
 	markerFlushRate : number?,
-	statusPollRate : number?
+	statusPollRate : number?,
+	assignmentRefreshRate : number?
 }
 
 --NOTE: The actual JSON type doesnt get represented cleanly in Roblox's intellesense. This is a simplified version for now.

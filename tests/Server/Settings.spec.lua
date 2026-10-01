@@ -49,6 +49,17 @@ return function()
             expect(settings.statusPollRate).to.equal(60)
         end)
 
+        it("should keep the assignment refresh rate at or above its minimum", function()
+            Gamebeast:UpdateSettings({ assignmentRefreshRate = 60 })
+            expect(settings.assignmentRefreshRate).to.equal(60)
+
+            expect(function()
+                Gamebeast:UpdateSettings({ assignmentRefreshRate = 5 })
+            end).to.throw()
+
+            expect(settings.assignmentRefreshRate).to.equal(60)
+        end)
+
         it("should refuse a key that is not a setting", function()
             expect(function()
                 Gamebeast:UpdateSettings({ statusPollRates = 60 })
