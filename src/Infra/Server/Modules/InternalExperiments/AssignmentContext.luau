@@ -94,6 +94,16 @@ local PLAYER_PROPERTY_GETTERS: { [string]: (player: Player) -> any } = {
 }
 
 --[[
+	The player properties only the player's client can report. Until it does, they are missing from
+	that player's context.
+]]
+local CLIENT_REPORTED_PROPERTIES: { [string]: true } = {
+	inputType = true,
+	device = true,
+	deviceSubType = true,
+}
+
+--[[
 	When experiments have filters that require server properties, these
 	callbacks are ran to retrieve and include that context in assignment
 	requests. (placeId/placeVersion travel in the shared context.)
@@ -362,11 +372,24 @@ end
 	experiment targeting, plus the player's developer-defined properties.
 	Players who resolve no context are omitted from the result.
 
+	Also returns the players whose client had not reported in by the time gathering gave up, when
+	targeting needs a property only their client can report. Their context went without it, so
+	their assignment is worth requesting again once the client does report.
+
 	@canyield
 ]]
-function AssignmentContext:GetForPlayers(playerIds: { number }, requiredProperties: { string }): { [number]: Context }
+function AssignmentContext:GetForPlayers(playerIds: { number }, requiredProperties: { string }): ({ [number]: Context }, { Player })
 	local robloxContextByPlayerId: { [number]: { [string]: any } } = {}
 	local retrievalCallbacks: { () -> () } = {}
+
+	local needsClientInfo = false
+	for _, path in requiredProperties do
+		local namespace, key = splitPropertyPath(path)
+		if namespace == ROBLOX_NAMESPACE and CLIENT_REPORTED_PROPERTIES[key] then
+			needsClientInfo = true
+			break
+		end
+	end
 
 	for _, playerId in playerIds do
 		local player = Players:GetPlayerByUserId(playerId)
@@ -402,15 +425,20 @@ function AssignmentContext:GetForPlayers(playerIds: { number }, requiredProperti
 	runBounded(retrievalCallbacks)
 
 	local contextByPlayerId: { [number]: Context } = {}
+	local playersAwaitingClientInfo: { Player } = {}
 	for playerId, robloxContext in robloxContextByPlayerId do
 		local player = Players:GetPlayerByUserId(playerId)
 		local context = buildContext(robloxContext, if player then PropertiesByPlayer[player] else nil)
 		if context then
 			contextByPlayerId[playerId] = context
 		end
+
+		if player and needsClientInfo and not ServerClientInfoHandler:IsClientInfoResolved(player) then
+			table.insert(playersAwaitingClientInfo, player)
+		end
 	end
 
-	return contextByPlayerId
+	return contextByPlayerId, playersAwaitingClientInfo
 end
 
 --[[

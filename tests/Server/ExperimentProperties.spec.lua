@@ -157,6 +157,20 @@ return function()
             expect(type(context.roblox.language)).to.equal("string")
         end)
 
+        it("should only report a player as awaiting client info when targeting needs it", function()
+            local _, awaiting = AssignmentContext:GetForPlayers({ player.UserId }, { "roblox.country" })
+            expect(#awaiting).to.equal(0)
+
+            local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler")
+            local contextByPlayerId, awaitingInput = AssignmentContext:GetForPlayers({ player.UserId }, { "roblox.inputType" })
+            if ServerClientInfoHandler:IsClientInfoResolved(player) then
+                expect(#awaitingInput).to.equal(0)
+                expect(contextByPlayerId[player.UserId].roblox.inputType).to.be.ok()
+            else
+                expect(awaitingInput[1]).to.equal(player)
+            end
+        end)
+
         it("should not treat a bare property name as a standard property", function()
             local contextByPlayerId = AssignmentContext:GetForPlayers({ player.UserId }, { "country" })
             expect(contextByPlayerId[player.UserId]).never.to.be.ok()

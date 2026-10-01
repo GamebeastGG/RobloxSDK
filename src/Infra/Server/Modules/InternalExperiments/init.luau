@@ -33,6 +33,7 @@ local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal)
 local Utilities = shared.GBMod("Utilities")
 local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
 local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
+local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
 local Cleaner = shared.GBMod("Cleaner") ---@module Cleaner
 local Changesets = require(script.Parent.Changesets)
 local ExperimentCatalog = require(script.ExperimentCatalog)
@@ -49,6 +50,22 @@ export type AssignmentRecord = {
 	status: "active" | "unenrolled",
 	source: string?,
 	assignmentVersion: number?,
+}
+
+type AssignmentState = {
+	playerIdsPendingAssignment: { [number]: true },
+	playerJoinListener: RBXScriptConnection,
+	playerLeaveListener: RBXScriptConnection,
+	deferredBulkAssignmentThread: thread?,
+	--[[
+		Id of the latest request sent for each player. A response is only applied for the players
+		it is still the latest request for: two requests for one player can be in flight at once
+		(a join and a property change, say), and the older one landing last must not undo the newer.
+	]]
+	latestRequestIdByPlayerId: { [number]: number },
+	lastRequestId: number,
+	-- Players whose assignment will be requested again once their client reports in
+	playersAwaitingClientInfo: { [Player]: true },
 }
 
 --= Constants =--
@@ -97,13 +114,7 @@ local propertyRefreshThread: thread? = nil
 --[[
 	User-assignment machinery, active only while user-unit experiments exist.
 ]]
-local currentAssignmentState: {
-	playerIdsPendingAssignment: { [number]: true },
-	playerJoinListener: RBXScriptConnection,
-	playerLeaveListener: RBXScriptConnection,
-	deferredBulkAssignmentThread: thread?,
-}? =
-	nil
+local currentAssignmentState: AssignmentState? = nil
 
 --[[
 	Players whose first bulk assignment response has arrived.
@@ -168,6 +179,35 @@ local function queueAssignment(players: { Player }, deferSeconds: number?)
 end
 
 --[[
+	Requests a player's assignment again as soon as their client reports in.
+
+	Used when a request had to go out before the client did, so it was sent without the
+	client-reported properties targeting needs (device, input type). Without this, a player on a
+	slow-loading device misses a targeted experiment until the next assignment refresh, and then
+	switches into it partway through their session.
+]]
+local function requeueOnClientInfo(assignmentState: AssignmentState, player: Player)
+	if assignmentState.playersAwaitingClientInfo[player] then
+		return
+	end
+	assignmentState.playersAwaitingClientInfo[player] = true
+
+	Utilities.GBLog(`Client info for player {player.UserId} has not arrived yet; requesting their assignment again once it does`)
+
+	-- Never fires if the player leaves first; the leave listener drops them from the awaiting set
+	ServerClientInfoHandler:OnClientInfoResolved(player, function()
+		if currentAssignmentState ~= assignmentState then
+			return
+		end
+
+		assignmentState.playersAwaitingClientInfo[player] = nil
+		if player.Parent then
+			queueAssignment({ player })
+		end
+	end)
+end
+
+--[[
 	Requests bulk assignment from the backend for queued players.
 
 	@canyield
@@ -195,10 +235,20 @@ function executeUserAssignmentRequest()
 		return
 	end
 
+	assignmentState.lastRequestId += 1
+	local requestId = assignmentState.lastRequestId
+	for _, playerId in playerIds do
+		assignmentState.latestRequestIdByPlayerId[playerId] = requestId
+	end
+
 	-- Retrieve context needed for assignment
-	local contextByPlayerId = AssignmentContext:GetForPlayers(playerIds, ExperimentCatalog:GetRequiredPropertyUnion("user"))
+	local contextByPlayerId, playersAwaitingClientInfo = AssignmentContext:GetForPlayers(playerIds, ExperimentCatalog:GetRequiredPropertyUnion("user"))
 	if currentAssignmentState ~= assignmentState then
 		return
+	end
+
+	for _, player in playersAwaitingClientInfo do
+		requeueOnClientInfo(assignmentState, player)
 	end
 
 	local units: { any } = {}
@@ -228,8 +278,10 @@ function executeUserAssignmentRequest()
 
 			local playersToRequeue: { Player } = {}
 			for _, unit in chunk do
-				local player = Players:GetPlayerByUserId(tonumber(unit.distinctId) :: number)
-				if player then
+				local playerId = tonumber(unit.distinctId) :: number
+				local player = Players:GetPlayerByUserId(playerId)
+				-- A newer request for the player is already out, and retries itself if it fails
+				if player and assignmentState.latestRequestIdByPlayerId[playerId] == requestId then
 					table.insert(playersToRequeue, player)
 				end
 			end
@@ -242,8 +294,14 @@ function executeUserAssignmentRequest()
 
 		-- The response is the complete assignment set for each unit; replace wholesale
 		for _, unit in chunk do
-			local player = Players:GetPlayerByUserId(tonumber(unit.distinctId) :: number)
+			local playerId = tonumber(unit.distinctId) :: number
+			local player = Players:GetPlayerByUserId(playerId)
 			if not player then
+				continue
+			end
+
+			-- Superseded by a request sent after this one, which applies the player's assignments itself
+			if assignmentState.latestRequestIdByPlayerId[playerId] ~= requestId then
 				continue
 			end
 
@@ -365,7 +423,8 @@ local function enableAssignment()
 		return
 	end
 
-	currentAssignmentState = {
+	local assignmentState: AssignmentState
+	assignmentState = {
 		playerIdsPendingAssignment = {},
 		playerJoinListener = Players.PlayerAdded:Connect(function(player)
 			queueAssignment({ player })
@@ -373,10 +432,16 @@ local function enableAssignment()
 		playerLeaveListener = ServerGate:OnPlayerRemoved(function(player)
 			Experiments.AssignmentsByPlayer[player] = nil
 			resolvedPlayerSet[player] = nil
+			assignmentState.latestRequestIdByPlayerId[player.UserId] = nil
+			assignmentState.playersAwaitingClientInfo[player] = nil
 			Experiments.OnPlayerAssignmentsChanged:Fire(player)
 		end),
 		deferredBulkAssignmentThread = nil,
+		latestRequestIdByPlayerId = {},
+		lastRequestId = 0,
+		playersAwaitingClientInfo = {},
 	}
+	currentAssignmentState = assignmentState
 
 	Utilities.GBLog("Started requesting experiment assignment")
 end
