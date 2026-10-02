@@ -17,7 +17,9 @@ type SDKSettings = {
 	statusPollRate : number,
 	-- Seconds between re-requesting experiment assignments for the players in the server and the
 	-- server itself, which is how assignment changes made on the dashboard reach a live server.
-	assignmentRefreshRate : number
+	assignmentRefreshRate : number,
+	-- Seconds between server state reports (players, server and client performance) to the backend.
+	serverReportRate : number
 }
 export type ServerSetupConfig = {
 	key : string | Secret,
@@ -34,7 +36,8 @@ export type RuntimeSDKSettings = {
 	sdkDebugEnabled : boolean?,
 	markerFlushRate : number?,
 	statusPollRate : number?,
-	assignmentRefreshRate : number?
+	assignmentRefreshRate : number?,
+	serverReportRate : number?
 }
 
 --NOTE: The actual JSON type doesnt get represented cleanly in Roblox's intellesense. This is a simplified version for now.

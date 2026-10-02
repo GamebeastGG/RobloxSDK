@@ -48,6 +48,7 @@ Relevant `sdkSettings`:
 - `markerFlushRate` — seconds between engagement marker batch flushes (default 10, minimum 1).
 - `statusPollRate` — seconds between change-detection polls (default 30, minimum 5). It acts as a floor: Gamebeast can ask servers to poll less often than this, to shed load, but never more often, and spreads their polls over a jitter window so servers don't all poll on the same tick.
 - `assignmentRefreshRate` — seconds between re-requesting experiment assignments for the players in the server and the server itself (default 30, minimum 10). This is how an assignment changed from the dashboard, such as a manual group reassignment, reaches players who are already in game.
+- `serverReportRate` — seconds between server state reports, which carry the players in the server and server and client performance (default 30, minimum 10, maximum 45). The cap keeps a report in every minute: concurrent player counts on the dashboard are built per minute from the servers that reported in it.
 
 ## Changing settings at runtime
 The `sdkSettings` passed to `Setup` can be changed on a running SDK with `UpdateSettings`. Settings left out of the table keep their current value, and nothing is applied unless every setting given is valid:
@@ -56,7 +57,7 @@ The `sdkSettings` passed to `Setup` can be changed on a running SDK with `Update
 Gamebeast:UpdateSettings({ statusPollRate = 120, sdkDebugEnabled = true })
 ```
 
-Changes take effect from the next use — the status poll, assignment refresh and marker flush loops pick theirs up within a few seconds. `environment` and `customUrl` are the exception and can only be set in `Setup`: they decide which backend the SDK talks to, and swapping that mid-session would leave the configs, experiments and datastore backup already loaded keyed to the environment they came from.
+Changes take effect from the next use — the status poll, assignment refresh, server report and marker flush loops pick theirs up within a few seconds. `environment` and `customUrl` are the exception and can only be set in `Setup`: they decide which backend the SDK talks to, and swapping that mid-session would leave the configs, experiments and datastore backup already loaded keyed to the environment they came from.
 
 ## Installation
 To get started with Gamebeast, sign up at https://dashboard.gamebeast.gg/

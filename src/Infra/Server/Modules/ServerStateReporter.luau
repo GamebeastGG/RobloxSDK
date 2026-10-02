@@ -21,6 +21,7 @@ local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
 local MetricCollector = shared.GBMod("MetricCollector") ---@module MetricCollector
 local GetRemote = shared.GBMod("GetRemote") ---@module GetRemote
 local Utilities = shared.GBMod("Utilities") ---@module Utilities
+local DataCache = shared.GBMod("DataCache")
 
 --= Types =--
 type ClientMetricReport = {
@@ -34,7 +35,9 @@ local ExportMetricsRemote = GetRemote("Event", "ExportClientMetrics")
 
 --= Constants =--
 local PROBE_FREQUENCY = 1 -- seconds
-local REPORT_FREQUENCY = 10 -- seconds
+-- How often the report loop re-derives its wait, so a lowered serverReportRate is picked up
+-- without sitting out a whole long interval first
+local REPORT_RECHECK_INTERVAL = 5 -- seconds
 
 --= Variables =--
 
@@ -125,9 +128,18 @@ function ServerStateReporter:Init()
         end
     end)
 
-    -- report the server state on a timer
+    -- report the server state every serverReportRate seconds
     task.spawn(function()
-        while task.wait(REPORT_FREQUENCY) do
+        local lastReportTime = tick()
+
+        while true do
+            local remaining = DataCache:Get("Settings").serverReportRate - (tick() - lastReportTime)
+            if remaining > 0 then
+                task.wait(math.min(remaining, REPORT_RECHECK_INTERVAL))
+                continue
+            end
+
+            lastReportTime = tick()
             self:SendServerStateReport()
         end
     end)

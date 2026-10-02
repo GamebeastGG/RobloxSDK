@@ -64,14 +64,18 @@ local function BooleanValidator(val : any) : (boolean, string?)
 	return true
 end
 
--- Validates an interval in seconds, refusing anything below `minimum` to keep request volume sane
-local function SecondsValidator(minimum : number) : (val : any) -> (boolean, string?)
+-- Validates an interval in seconds, refusing anything below `minimum` to keep request volume sane,
+-- and anything above `maximum` when the backend needs the data at least that often
+local function SecondsValidator(minimum : number, maximum : number?) : (val : any) -> (boolean, string?)
 	return function(val)
 		if type(val) ~= "number" or val ~= val then
 			return false, `Expected a number of seconds, got {DescribeValue(val)}.`
 		end
 		if val < minimum then
 			return false, `Expected at least {minimum} seconds, got {val}.`
+		end
+		if maximum and val > maximum then
+			return false, `Expected at most {maximum} seconds, got {val}.`
 		end
 		return true
 	end
@@ -123,6 +127,12 @@ local DEFAULT_SETTINGS = {
 	assignmentRefreshRate = {
 		value = 30,
 		validator = SecondsValidator(10),
+	},
+	serverReportRate = {
+		value = 30,
+		-- Capped below a minute: concurrent player counts are built per minute from the servers that
+		-- reported in it, and player online status treats a report older than 2 minutes as gone
+		validator = SecondsValidator(10, 45),
 	},
 }
 
@@ -353,7 +363,7 @@ end
 	nothing is applied unless every setting given is valid.
 
 	The SDK reads settings as it needs them rather than holding onto them, so a change takes effect
-	from the next use: the status poll, assignment refresh and marker flush loops pick theirs up within a few seconds.
+	from the next use: the status poll, assignment refresh, server report and marker flush loops pick theirs up within a few seconds.
 
 	`environment` and `customUrl` are refused here; they are only set in :Setup().
 ]]

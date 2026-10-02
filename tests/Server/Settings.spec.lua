@@ -60,6 +60,22 @@ return function()
             expect(settings.assignmentRefreshRate).to.equal(60)
         end)
 
+        it("should keep the server report rate between its minimum and maximum", function()
+            Gamebeast:UpdateSettings({ serverReportRate = 45 })
+            expect(settings.serverReportRate).to.equal(45)
+
+            expect(function()
+                Gamebeast:UpdateSettings({ serverReportRate = 9 })
+            end).to.throw()
+
+            -- The dashboard needs a report from every server at least once a minute
+            expect(function()
+                Gamebeast:UpdateSettings({ serverReportRate = 60 })
+            end).to.throw()
+
+            expect(settings.serverReportRate).to.equal(45)
+        end)
+
         it("should say why a value was rejected", function()
             local function rejectionOf(sdkSettings)
                 local ok, message = pcall(function()
