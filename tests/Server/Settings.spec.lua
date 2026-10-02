@@ -60,6 +60,26 @@ return function()
             expect(settings.assignmentRefreshRate).to.equal(60)
         end)
 
+        it("should say why a value was rejected", function()
+            local function rejectionOf(sdkSettings)
+                local ok, message = pcall(function()
+                    Gamebeast:UpdateSettings(sdkSettings)
+                end)
+                expect(ok).to.equal(false)
+                return tostring(message)
+            end
+
+            local tooLow = rejectionOf({ statusPollRate = 2 })
+            expect(string.find(tooLow, "statusPollRate", 1, true)).to.be.ok()
+            expect(string.find(tooLow, "at least 5 seconds, got 2", 1, true)).to.be.ok()
+
+            local wrongType = rejectionOf({ markerFlushRate = "10" })
+            expect(string.find(wrongType, "Expected a number of seconds, got \"10\"", 1, true)).to.be.ok()
+
+            local notBoolean = rejectionOf({ sdkDebugEnabled = 1 })
+            expect(string.find(notBoolean, "Expected true or false, got 1 (number)", 1, true)).to.be.ok()
+        end)
+
         it("should refuse a key that is not a setting", function()
             expect(function()
                 Gamebeast:UpdateSettings({ statusPollRates = 60 })

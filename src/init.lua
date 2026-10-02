@@ -47,31 +47,58 @@ type PublicModuleData = {
 	Instance : ModuleScript,
 }
 
+--= Setting Validators =--
+
+-- Describes a rejected value for an error message, quoting strings so an empty one is visible
+local function DescribeValue(val : any) : string
+	if type(val) == "string" then
+		return `"{val}"`
+	end
+	return `{tostring(val)} ({typeof(val)})`
+end
+
+local function BooleanValidator(val : any) : (boolean, string?)
+	if type(val) ~= "boolean" then
+		return false, `Expected true or false, got {DescribeValue(val)}.`
+	end
+	return true
+end
+
+-- Validates an interval in seconds, refusing anything below `minimum` to keep request volume sane
+local function SecondsValidator(minimum : number) : (val : any) -> (boolean, string?)
+	return function(val)
+		if type(val) ~= "number" or val ~= val then
+			return false, `Expected a number of seconds, got {DescribeValue(val)}.`
+		end
+		if val < minimum then
+			return false, `Expected at least {minimum} seconds, got {val}.`
+		end
+		return true
+	end
+end
+
 --= Constants =--
 
 local DEFAULT_SETTINGS = {
 	sdkWarningsEnabled = {
 		value = true,
-		validator = function(val)
-			return type(val) == "boolean"
-		end
+		validator = BooleanValidator,
 	},
 	includeWarningStackTrace = {
 		value = false,
-		validator = function(val)
-			return type(val) == "boolean"
-		end
+		validator = BooleanValidator,
 	},
 	sdkDebugEnabled = {
 		value = false,
-		validator = function(val)
-			return type(val) == "boolean"
-		end
+		validator = BooleanValidator,
 	},
 	customUrl = {
 		value = nil,
 		validator = function(val)
-			return type(val) == "string" or val == nil
+			if val ~= nil and type(val) ~= "string" then
+				return false, `Expected a URL string or nil, got {DescribeValue(val)}.`
+			end
+			return true
 		end
 	},
 	environment = {
@@ -79,26 +106,23 @@ local DEFAULT_SETTINGS = {
 		validator = function(val)
 			-- Built-in aliases are "production", "studio" and "development";
 			-- any other non-empty string targets a custom environment by its alias.
-			return val == nil or (type(val) == "string" and #val > 0)
+			if val ~= nil and (type(val) ~= "string" or #val == 0) then
+				return false, `Expected an environment alias or nil, got {DescribeValue(val)}.`
+			end
+			return true
 		end
 	},
 	markerFlushRate = {
 		value = 10,
-		validator = function(val)
-			return type(val) == "number" and val >= 1
-		end
+		validator = SecondsValidator(1),
 	},
 	statusPollRate = {
 		value = 30,
-		validator = function(val)
-			return type(val) == "number" and val >= 5
-		end
+		validator = SecondsValidator(5),
 	},
 	assignmentRefreshRate = {
 		value = 30,
-		validator = function(val)
-			return type(val) == "number" and val >= 10
-		end
+		validator = SecondsValidator(10),
 	},
 }
 
