@@ -50,6 +50,8 @@ Relevant `sdkSettings`:
 - `assignmentRefreshRate` — seconds between re-requesting experiment assignments for the players in the server and the server itself (default 30, minimum 10). This is how an assignment changed from the dashboard, such as a manual group reassignment, reaches players who are already in game.
 - `serverReportRate` — seconds between server state reports, which carry the players in the server and server and client performance (default 30, minimum 10, maximum 45). The cap keeps a report in every minute: concurrent player counts on the dashboard are built per minute from the servers that reported in it.
 
+In Studio, any rate you leave out of `sdkSettings` defaults faster, so dashboard edits show up quickly while you test: `markerFlushRate` 2s, `statusPollRate` 5s, `assignmentRefreshRate` 10s and `serverReportRate` 10s. Rates you set yourself are used as given, in Studio and in live servers.
+
 ## Changing settings at runtime
 The `sdkSettings` passed to `Setup` can be changed on a running SDK with `UpdateSettings`. Settings left out of the table keep their current value, and nothing is applied unless every setting given is valid:
 

@@ -83,6 +83,11 @@ end
 
 --= Constants =--
 
+--[[
+	`studioValue` replaces `value` as the default when running in Studio, so edits on the dashboard
+	show up quickly while testing. It only fills in settings the developer left out of Setup, and the
+	validators' minimums still apply.
+]]
 local DEFAULT_SETTINGS = {
 	sdkWarningsEnabled = {
 		value = true,
@@ -118,18 +123,22 @@ local DEFAULT_SETTINGS = {
 	},
 	markerFlushRate = {
 		value = 10,
+		studioValue = 2,
 		validator = SecondsValidator(1),
 	},
 	statusPollRate = {
 		value = 30,
+		studioValue = 5,
 		validator = SecondsValidator(5),
 	},
 	assignmentRefreshRate = {
 		value = 30,
+		studioValue = 10,
 		validator = SecondsValidator(10),
 	},
 	serverReportRate = {
 		value = 30,
+		studioValue = 10,
 		-- Capped below a minute: concurrent player counts are built per minute from the servers that
 		-- reported in it, and player online status treats a report older than 2 minutes as gone
 		validator = SecondsValidator(10, 45),
@@ -154,8 +163,16 @@ local Initializing = false
 local DidRequire = false
 local DidSetup = false
 local IsServer = RunService:IsServer()
+local IsStudio = RunService:IsStudio()
 
 --= Internal Functions =--
+
+local function GetDefaultValue(settingData : { value : any, studioValue : any? }) : any
+	if IsStudio and settingData.studioValue ~= nil then
+		return settingData.studioValue
+	end
+	return settingData.value
+end
 
 local function ValidateSetting(key : string, value : any)
 	local settingData = DEFAULT_SETTINGS[key]
@@ -268,7 +285,7 @@ local function StartSDK()
 	--NOTE: All modules that use settings should await them if they are needed during init.
 	local defaultSettings = {}
 	for key, settingData in DEFAULT_SETTINGS do
-		defaultSettings[key] = settingData.value
+		defaultSettings[key] = GetDefaultValue(settingData)
 	end
 
 	dataCacheModule:Set("Settings", defaultSettings)
@@ -343,7 +360,7 @@ function Gamebeast:Setup(setupConfig : ServerSetupConfig?)
 
 	for key, settingData in DEFAULT_SETTINGS do
 		if sdkSettings[key] == nil then
-			sdkSettings[key] = settingData.value
+			sdkSettings[key] = GetDefaultValue(settingData)
 		end
 
 		ValidateSetting(key, sdkSettings[key])
