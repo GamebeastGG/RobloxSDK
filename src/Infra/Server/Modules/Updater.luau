@@ -38,9 +38,12 @@ local DatatstoreBackup = shared.GBMod("DatastoreBackup") ---@module DatastoreBac
 --[[
 	The polling object returned by the bootstrap and status endpoints: the backend's control over how
 	often servers poll, so requests can be shed globally without shipping an SDK update.
+
+	Normally it carries only a jitter ratio and servers poll on their statusPollRate setting. The
+	backend adds `intervalSeconds` only to shed load in an emergency, and drops it again after.
 ]]
 type PollingDirective = {
-	-- Seconds between status polls. Absent leaves servers on their statusPollRate setting.
+	-- Seconds between status polls, sent only to shed load. Absent leaves servers on statusPollRate.
 	intervalSeconds : number?,
 	-- Fraction of the interval to spread polls over, so servers don't line up on the same tick.
 	jitterRatio : number?,

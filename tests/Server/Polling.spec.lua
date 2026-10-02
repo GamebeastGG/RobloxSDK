@@ -68,6 +68,28 @@ return function()
             end
         end)
 
+        -- The backend's normal response: jitter only, with an interval added just to shed load
+        it("should spread polls on the setting when Gamebeast sends only a jitter ratio", function()
+            Updater:SetPollingDirective({ jitterRatio = 0.5 })
+            expect(Updater:GetPollDelay(0)).to.equal(POLL_RATE)
+            expect(Updater:GetPollDelay(1)).to.equal(POLL_RATE * 1.5)
+
+            -- A low setting takes effect, since nothing is holding servers back
+            settings.statusPollRate = 5
+            expect(Updater:GetPollDelay(0)).to.equal(5)
+        end)
+
+        it("should slow down to a load-shedding interval and recover when it is withdrawn", function()
+            Updater:SetPollingDirective({ jitterRatio = 0.2 })
+            expect(Updater:GetPollDelay(0)).to.equal(POLL_RATE)
+
+            Updater:SetPollingDirective({ intervalSeconds = 300, jitterRatio = 0.2 })
+            expect(Updater:GetPollDelay(0)).to.equal(300)
+
+            Updater:SetPollingDirective({ jitterRatio = 0.2 })
+            expect(Updater:GetPollDelay(0)).to.equal(POLL_RATE)
+        end)
+
         it("should ignore a jitter ratio outside 0-1", function()
             Updater:SetPollingDirective({ jitterRatio = 5 })
             expect(Updater:GetPollDelay(1)).to.equal(POLL_RATE)

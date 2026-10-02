@@ -46,7 +46,7 @@ Values must be strings, numbers, booleans, or lists of those (up to 100 items). 
 
 Relevant `sdkSettings`:
 - `markerFlushRate` — seconds between engagement marker batch flushes (default 10, minimum 1).
-- `statusPollRate` — seconds between change-detection polls (default 30, minimum 5). It acts as a floor: Gamebeast can ask servers to poll less often than this, to shed load, but never more often, and spreads their polls over a jitter window so servers don't all poll on the same tick.
+- `statusPollRate` — seconds between change-detection polls (default 30, minimum 5). Servers poll on this setting, spread over a small jitter window so they don't all poll on the same tick. During an incident Gamebeast can temporarily ask servers to poll less often, to shed load; it never makes them poll more often than this.
 - `assignmentRefreshRate` — seconds between re-requesting experiment assignments for the players in the server and the server itself (default 30, minimum 10). This is how an assignment changed from the dashboard, such as a manual group reassignment, reaches players who are already in game.
 - `serverReportRate` — seconds between server state reports, which carry the players in the server and server and client performance (default 30, minimum 10, maximum 45). The cap keeps a report in every minute: concurrent player counts on the dashboard are built per minute from the servers that reported in it.
 
