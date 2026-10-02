@@ -67,6 +67,10 @@ local DefaultInfo = Schema.new({
     hasFriendsOnline = {
         default = false,
         type = "boolean",
+    },
+    friendClockStart = {
+        default = nil,
+        type = "number",
     }
 })
 
@@ -87,7 +91,7 @@ local function UpdateClientInfoCache(player : Player, updatedInfo : { [string] :
 
     for updatedKey, updatedValue in pairs(updatedInfo) do
         if not DefaultInfo:HasKey(updatedKey) then
-            return
+            continue
         end
 
         local currentValue = ClientInfoCache[player][updatedKey]

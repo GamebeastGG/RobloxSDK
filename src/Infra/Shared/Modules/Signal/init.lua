@@ -66,6 +66,9 @@ function Signal:_createConnection(isOnce : boolean, callback : (any) -> ()) : Si
     }
 
     callbackData.connection = SignalConnection.new(function()
+        -- Lets a Fire already in progress skip it, since it iterates over a snapshot
+        callbackData.disconnected = true
+
         local index = table.find(self._callbacks, callbackData)
 
         if index then
@@ -93,6 +96,10 @@ function Signal:Wait() : ...any
     local callbackData = {
         isOnce = false,
         callback = function(...)
+            -- Only the first fire counts; this stays connected until the waiting thread resumes
+            if isFired then
+                return
+            end
             isFired = true
             data = table.pack(...)
         end
@@ -109,12 +116,27 @@ function Signal:Wait() : ...any
     return table.unpack(data)
 end
 
+--[[
+    Calls every listener connected when the fire begins.
+
+    Iterates over a snapshot of the listeners. Walking the live list let a listener that connected
+    another one mid-fire shift the list under the loop, so the next listener in line was silently
+    skipped. Now a listener connected during a fire waits for the next one, and a listener
+    disconnected during a fire (by an earlier listener) is not called, matching RBXScriptSignal.
+]]
 function Signal:Fire(...)
     local argCount = select("#", ...)
-    local lastLength = #self._callbacks
-    local currentIndex = 1
-    while currentIndex <= #self._callbacks do
-        local callbackData = self._callbacks[currentIndex]
+
+    for _, callbackData in table.clone(self._callbacks) do
+        if callbackData.disconnected then
+            continue
+        end
+
+        -- Disconnected before it runs, so a fire from inside its own callback can't call it again
+        if callbackData.isOnce then
+            callbackData.connection:Disconnect()
+        end
+
         local dataToSend = table.create(argCount)
         for argIndex = 1, argCount do
             local arg = select(argIndex, ...)
@@ -122,13 +144,6 @@ function Signal:Fire(...)
         end
 
         task.spawn(callbackData.callback, table.unpack(dataToSend, 1, argCount))
-        if callbackData.isOnce then
-            callbackData.connection:Disconnect()
-        end
-
-        local newLength = #self._callbacks
-        currentIndex += (1 - (lastLength - newLength))
-        lastLength = newLength
     end
 end
 

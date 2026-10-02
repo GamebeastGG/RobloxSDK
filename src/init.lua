@@ -25,13 +25,14 @@ local Types = require(script.Infra.Types)
 
 export type ServerSetupConfig = Types.ServerSetupConfig
 export type JSON = Types.JSON
+export type RuntimeSDKSettings = Types.RuntimeSDKSettings
 
 -- Services
 export type ConfigsService = Types.ConfigsService
 export type MarkersService = Types.MarkersService
-export type JobsService = Types.JobsService
-export type EventsService = Types.EventsService
 export type ExperimentsService = Types.ExperimentsService
+export type ExperimentAssignment = Types.ExperimentAssignment
+export type ExperimentPropertyValue = Types.ExperimentPropertyValue
 export type CohortsService = Types.CohortsService
 
 type ModuleData = {
@@ -46,40 +47,112 @@ type PublicModuleData = {
 	Instance : ModuleScript,
 }
 
+--= Setting Validators =--
+
+-- Describes a rejected value for an error message, quoting strings so an empty one is visible
+local function DescribeValue(val : any) : string
+	if type(val) == "string" then
+		return `"{val}"`
+	end
+	return `{tostring(val)} ({typeof(val)})`
+end
+
+local function BooleanValidator(val : any) : (boolean, string?)
+	if type(val) ~= "boolean" then
+		return false, `Expected true or false, got {DescribeValue(val)}.`
+	end
+	return true
+end
+
+-- Validates an interval in seconds, refusing anything below `minimum` to keep request volume sane,
+-- and anything above `maximum` when the backend needs the data at least that often
+local function SecondsValidator(minimum : number, maximum : number?) : (val : any) -> (boolean, string?)
+	return function(val)
+		if type(val) ~= "number" or val ~= val then
+			return false, `Expected a number of seconds, got {DescribeValue(val)}.`
+		end
+		if val < minimum then
+			return false, `Expected at least {minimum} seconds, got {val}.`
+		end
+		if maximum and val > maximum then
+			return false, `Expected at most {maximum} seconds, got {val}.`
+		end
+		return true
+	end
+end
+
 --= Constants =--
 
+--[[
+	`studioValue` replaces `value` as the default when running in Studio, so edits on the dashboard
+	show up quickly while testing. It only fills in settings the developer left out of Setup, and the
+	validators' minimums still apply.
+]]
 local DEFAULT_SETTINGS = {
 	sdkWarningsEnabled = {
 		value = true,
-		validator = function(val)
-			return type(val) == "boolean"
-		end
+		validator = BooleanValidator,
 	},
 	includeWarningStackTrace = {
 		value = false,
-		validator = function(val)
-			return type(val) == "boolean"
-		end
+		validator = BooleanValidator,
 	},
 	sdkDebugEnabled = {
 		value = false,
-		validator = function(val)
-			return type(val) == "boolean"
-		end
+		validator = BooleanValidator,
 	},
 	customUrl = {
 		value = nil,
 		validator = function(val)
-			return type(val) == "string" or val == nil
+			if val ~= nil and type(val) ~= "string" then
+				return false, `Expected a URL string or nil, got {DescribeValue(val)}.`
+			end
+			return true
 		end
 	},
 	environment = {
 		value = nil,
 		validator = function(val)
-			return val == "production" or val == "studio" or val == nil
+			-- Built-in aliases are "production", "studio" and "development";
+			-- any other non-empty string targets a custom environment by its alias.
+			if val ~= nil and (type(val) ~= "string" or #val == 0) then
+				return false, `Expected an environment alias or nil, got {DescribeValue(val)}.`
+			end
+			return true
 		end
 	},
+	markerFlushRate = {
+		value = 10,
+		studioValue = 2,
+		validator = SecondsValidator(1),
+	},
+	statusPollRate = {
+		value = 30,
+		studioValue = 5,
+		validator = SecondsValidator(5),
+	},
+	assignmentRefreshRate = {
+		value = 30,
+		studioValue = 10,
+		validator = SecondsValidator(10),
+	},
+	serverReportRate = {
+		value = 30,
+		studioValue = 10,
+		-- Capped below a minute: concurrent player counts are built per minute from the servers that
+		-- reported in it, and player online status treats a report older than 2 minutes as gone
+		validator = SecondsValidator(10, 45),
+	},
 }
+
+-- Settings :UpdateSettings() refuses, because they decide which backend the SDK talks to: swapping
+-- that mid-session would leave the configs, experiments and datastore backup it has already loaded
+-- keyed to the environment they came from.
+local SETUP_ONLY_SETTINGS = {
+	customUrl = true,
+	environment = true,
+}
+
 --= Object References =--
 
 --= Variables =--
@@ -88,9 +161,30 @@ local Modules = {} :: { [string] : ModuleData }
 local PublicModules = {} :: { [string] : ModuleData }
 local Initializing = false
 local DidRequire = false
+local DidSetup = false
 local IsServer = RunService:IsServer()
+local IsStudio = RunService:IsStudio()
 
 --= Internal Functions =--
+
+local function GetDefaultValue(settingData : { value : any, studioValue : any? }) : any
+	if IsStudio and settingData.studioValue ~= nil then
+		return settingData.studioValue
+	end
+	return settingData.value
+end
+
+local function ValidateSetting(key : string, value : any)
+	local settingData = DEFAULT_SETTINGS[key]
+	if not settingData then
+		error(`"{key}" is not a Gamebeast SDK setting.`, 3)
+	end
+
+	local isValid, reason = settingData.validator(value)
+	if isValid == false then
+		error(`The value of the Gamebeast SDK setting "{key}" is invalid.{reason and " " .. reason or ""}`, 3)
+	end
+end
 
 local function RequireModule(moduleData : ModuleData)
 	if moduleData.Loaded then
@@ -191,7 +285,7 @@ local function StartSDK()
 	--NOTE: All modules that use settings should await them if they are needed during init.
 	local defaultSettings = {}
 	for key, settingData in DEFAULT_SETTINGS do
-		defaultSettings[key] = settingData.value
+		defaultSettings[key] = GetDefaultValue(settingData)
 	end
 
 	dataCacheModule:Set("Settings", defaultSettings)
@@ -266,12 +360,10 @@ function Gamebeast:Setup(setupConfig : ServerSetupConfig?)
 
 	for key, settingData in DEFAULT_SETTINGS do
 		if sdkSettings[key] == nil then
-			sdkSettings[key] = settingData.value
+			sdkSettings[key] = GetDefaultValue(settingData)
 		end
-		
-		if settingData.validator(sdkSettings[key]) == false then 
-			error(`The value of the Gamebeast SDK setting "{key}" is invalid.`, 2)
-		end
+
+		ValidateSetting(key, sdkSettings[key])
 	end
 
 	StartSDK()
@@ -279,6 +371,37 @@ function Gamebeast:Setup(setupConfig : ServerSetupConfig?)
 	local dataCacheModule = RequireModule(GetModule("DataCache"))
 	dataCacheModule:Set("Key", setupConfig.key)
 	dataCacheModule:Set("Settings", sdkSettings)
+
+	DidSetup = true
+end
+
+--[[
+	Changes SDK settings on a running SDK. Settings left out of the table keep their current value, and
+	nothing is applied unless every setting given is valid.
+
+	The SDK reads settings as it needs them rather than holding onto them, so a change takes effect
+	from the next use: the status poll, assignment refresh, server report and marker flush loops pick theirs up within a few seconds.
+
+	`environment` and `customUrl` are refused here; they are only set in :Setup().
+]]
+function Gamebeast:UpdateSettings(sdkSettings : RuntimeSDKSettings)
+	assert(type(sdkSettings) == "table", "Gamebeast:UpdateSettings expects a table of settings.")
+	assert(DidSetup, "Gamebeast:UpdateSettings can only be used after Gamebeast:Setup().")
+
+	-- Validated up front, so a bad value leaves the settings it was sent with untouched
+	for key, value in sdkSettings do
+		if SETUP_ONLY_SETTINGS[key] then
+			error(`The Gamebeast SDK setting "{key}" can only be set in Gamebeast:Setup().`, 2)
+		end
+
+		ValidateSetting(key, value)
+	end
+
+	-- Written into the live table rather than replacing it, since the SDK reads fields off it
+	local settings = RequireModule(GetModule("DataCache")):Get("Settings")
+	for key, value in sdkSettings do
+		settings[key] = value
+	end
 end
 
 --= Initializers =--

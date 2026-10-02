@@ -34,22 +34,22 @@ local ENDPOINTS = {
 		URL = "https://api.gamebeast.gg", -- http://localhost:3001 -- https://api.gamebeast.gg -- https://api.stage.gamebeast.gg
 		Requests = { -- NOTE: If you require URL parameters, use {param} in the route string. Example: "v1/servers/roblox/{serverId}"
 			["v1/markers"] = "POST",
-			["v1/requests"] = "GET",
-			["v1/requests/completed"] = "POST",
-			["v1/requests/started"] = "PUT",
-			["v1/configurations"] = "GET",
 			["v1/latest/version?platform=roblox"] = "GET",
-			["v1/experiments"] = "GET",
-			["v1/experiments/assignments"] = "POST",
 			["v1/servers/roblox/{serverId}"] = "POST",
-			["v1/cohorts/membership"] = "POST"
+			["v1/cohorts/membership"] = "POST",
+			["v2/bootstrap"] = "GET",
+			["v2/status"] = "GET",
+			["v2/configurations"] = "GET",
+			["v2/experiments/active"] = "GET",
+			["v2/experiments/assignments/bulk"] = "POST"
 		},
 		EndpointTree = {} -- Automatically generated from above
 	}
 }
 local ENVIRONMENT_MAP = {
 	["production"] = "false",
-	["studio"] = "true"
+	["studio"] = "true",
+	["development"] = "true"
 }
 --= Object References =--
 
@@ -117,8 +117,9 @@ function GBRequests:GBRequest(requestRoute : string, args : {[string] : any}, he
 	end)
 end
 
---YEILDS 
-function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any}, headerOverrides : {[string] : any}?, maxRetries : number?) : (boolean, any?)
+--YEILDS
+-- Returns success, parsed response body (if any), and the response status code (if a response was received).
+function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any}, headerOverrides : {[string] : any}?, maxRetries : number?) : (boolean, any?, number?)
 	local authKey = YeildForKey() -- Will wait for Key and Settings to be set
 	local GBDomain, requestMethod = GetEndpointForRequest(requestRoute)
 	
@@ -135,15 +136,17 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 
 	local targetEnvironment = DataCache:Get("Settings").environment
 	local isStudioHeader = tostring(RunService:IsStudio())
-	
+
 	if targetEnvironment and ENVIRONMENT_MAP[targetEnvironment] then
 		isStudioHeader = ENVIRONMENT_MAP[targetEnvironment]
 	end
 
 	-- Define relevant headers. Backend enforces header presence unless specified.
+	-- "environment" is the v2 header ("studio" is accepted as a synonym for development), "isstudio" remains for v1 routes.
 	local headers = {
 		["authorization"] = authKey,
 		["isstudio"] = isStudioHeader,
+		["environment"] = targetEnvironment or (RunService:IsStudio() and "studio" or "production"),
 		["sdkversion"] = MetaData.version,
 		["universeid"] = tostring(game.GameId),
 		["serverid"] = Utilities.getServerId(),
@@ -185,8 +188,9 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 	RequestProcessingCount -= 1
 
 	local success = requestSuccess and response.Success or false
+	local statusCode = response and response.StatusCode or nil
 	if response and #response.Body > 0 then
-		if (response.StatusCode == 401 or response.StatusCode == 403) and not KeyWarningGiven then
+		if (statusCode == 401 or statusCode == 403) and not KeyWarningGiven then
 			Utilities.GBWarn("Gamebeast project key invalid or not set! Set your project key in the :Setup method.")
 			KeyWarningGiven = true
 		end
@@ -196,14 +200,15 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 			return HttpService:JSONDecode(response.Body)
 		end)
 
-		if success == false then
-			Utilities.GBWarn("Request failed ("..response.StatusCode.. ") | ".. requestRoute .." | "..(bodyParsed and bodyParsed.message or "Unknown error"))
+		-- 304 is the expected "not modified" response for hash-based change detection, not a failure.
+		if success == false and statusCode ~= 304 then
+			Utilities.GBWarn("Request failed ("..statusCode.. ") | ".. requestRoute .." | "..(bodyParsed and bodyParsed.message or "Unknown error"))
 		end
-		
-		return success, bodyParsed
+
+		return success, bodyParsed, statusCode
 	end
 
-	return success
+	return success, nil, statusCode
 end
 
 --= Initializers =--

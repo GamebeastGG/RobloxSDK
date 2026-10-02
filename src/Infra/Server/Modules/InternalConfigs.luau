@@ -1,12 +1,14 @@
 --[[
 	The Gamebeast SDK is Copyright © 2023 Gamebeast, Inc. to present.
 	All rights reserved.
-	
+
 	InternalConfigs.luau
-	
+
 	Description:
 		Internal module for managing configuration data across the server and clients.
-	
+		Holds every configuration for the environment, keyed by id, and resolves
+		consumer paths whose first segment is the configuration's alias or name.
+
 --]]
 
 --= Root =--
@@ -24,11 +26,27 @@ local SignalConnection = shared.GBMod("SignalConnection")
 
 --= Types =--
 
+export type ConfigEntry = {
+	id : number,
+	name : string?,
+	alias : string?,
+	hash : string,
+	updatedAt : string?,
+
+	-- Unevaluated configuration document from the backend
+	base : { [string] : any },
+	-- Per-config privacy paths
+	privacy : { { string } },
+
+	-- Evaluated server view (base + server experiment changesets), frozen
+	serverView : { [string] : any }?,
+	-- Sparse per-player evaluated views; absent players fall back to the server view
+	viewByPlayer : { [Player] : { [string] : any } },
+}
+
 --= Object References =--
 
 local GetConfigRemoteFunc = GetRemote("Function", "Get")
-local GetEventDataRemoteFunc = GetRemote("Function", "GetEventData")
-local EventDataUpdatedRemote = GetRemote("Event", "EventDataUpdated")
 local ConfigChangedRemote = GetRemote("Event", "ConfigChanged")
 local ConfigReadySignal = Signal.new()
 local BatchConfigUpdatedSignal = Signal.new()
@@ -38,36 +56,40 @@ local BatchConfigUpdatedSignal = Signal.new()
 --= Variables =--
 
 local ConfigsReady = false
-local ActiveConfigs = {
-	--Full dev defined configuration profile
-	DevConfigs = {},
-
-	-- Per-player dev-defined configuration profiles
-	DevConfigsByPlayer = {} :: {
-		[Player]: {
-			[string]: any,
-		}
-	},
-
-	--Metadata sent along with dev defined configs
-	GBConfigs = {},
-	--Set of client accessible configs
-	ClientConfigs = {}
-}
-local CurrentClientPrivacy = {}
-local CurrentClientPrivacyByPlayer = {} :: {
-	[Player]: {{string}},
-}
---[[ Full dev defined configuration profile
-ActiveConfigs.DevConfigs = {}
--- Metadata sent along with dev defined configs
-configsMod.GBConfigs = {}
--- Set of client accessible configs
-configsMod.clientConfigs = {}]]
+local ActiveConfigs = {} :: { [number] : ConfigEntry }
+-- Consumer path identifiers resolve alias first, then name, then id (as a string)
+local ConfigIdByIdentifier = {} :: { [string] : number }
 
 --= Public Variables =--
 
 --= Internal Functions =--
+
+local function RebuildIdentifierMap()
+	table.clear(ConfigIdByIdentifier)
+
+	-- Insertion order determines resolution priority: later writes win
+	for configId in ActiveConfigs do
+		ConfigIdByIdentifier[tostring(configId)] = configId
+	end
+	for configId, entry in ActiveConfigs do
+		if entry.name then
+			ConfigIdByIdentifier[entry.name] = configId
+		end
+	end
+	for configId, entry in ActiveConfigs do
+		if entry.alias then
+			ConfigIdByIdentifier[entry.alias] = configId
+		end
+	end
+end
+
+local function ResolveConfigId(identifier : string) : number?
+	return ConfigIdByIdentifier[tostring(identifier)]
+end
+
+local function GetIdentifierForEntry(entry : ConfigEntry) : string
+	return entry.alias or entry.name or tostring(entry.id)
+end
 
 local function IsPathPrivate(path : {string}, privatePaths: {{string}}) : boolean
 	for _, privacyPath in privatePaths do
@@ -130,6 +152,14 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 			break
 		end
 
+		-- Nothing private can be left inside a value that is not a table. A change that removes a
+		-- key sitting above a privacy path arrives carrying no value at all, so there is nothing to
+		-- scrub; descending into it raised "attempt to index nil" and, with no pcall around the poll
+		-- loop, took status polling down with it for the rest of the server's life.
+		if type(configCopy) ~= "table" then
+			continue
+		end
+
 		local target = configCopy
 		for index, pathSegment in targetPath do
 			if index == #targetPath then
@@ -138,7 +168,9 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 			else
 				target = target[pathSegment]
 
-				if target == nil then
+				-- Covers a scalar as well as a missing key: either way the privacy path runs deeper
+				-- than the document does, so there is nothing there to remove
+				if type(target) ~= "table" then
 					Utilities.GBWarn("Privacy path ".. table.concat(targetPath, ".").. " does not exist in config.")
 					break
 				end
@@ -147,6 +179,44 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 	end
 
 	return configCopy
+end
+
+local function addRootmostPathToSet(rootmostPathSet: {[string]: {string}?}, newPath: {string}): ()
+	if #newPath == 0 then
+		table.clear(rootmostPathSet)
+	end
+
+	-- Build hash key from path, escaping segment delimiter in case user-defined path contains it
+	local escapedNewPath: {string} = table.create(#newPath)
+	for _, pathSegment in newPath do
+		table.insert(escapedNewPath, (pathSegment:gsub("\\", "\\\\"):gsub("%.", "\\.")))
+	end
+	local newPathKey = table.concat(escapedNewPath, ".")
+
+	-- If already exactly in set, skip adding
+	if rootmostPathSet[newPathKey] then
+		return
+	end
+
+	-- Check if existing paths cover new path
+	for existingPathKey in rootmostPathSet do
+		if string.sub(newPathKey, 1, #existingPathKey) == existingPathKey then
+
+			-- If new one is higher-level than existing, replace it
+			if #newPathKey < #existingPathKey then
+				rootmostPathSet[existingPathKey] = nil
+				rootmostPathSet[newPathKey] = newPath
+				return
+
+			-- If existing is higher-level than new, skip adding
+			else
+				return
+			end
+		end
+	end
+
+	-- If no existing paths cover new path, add it to the set
+	rootmostPathSet[newPathKey] = newPath
 end
 
 --= API Functions =--
@@ -159,9 +229,28 @@ function InternalConfigs:OnReady(callback : (newConfigs : any) -> ()) : RBXScrip
 	if not ConfigsReady then
 		return ConfigReadySignal:Once(callback)
 	else
-		task.spawn(callback, ActiveConfigs.DevConfigs)
+		task.spawn(callback, self:GetAll(nil))
 		return SignalConnection.new()
 	end
+end
+
+--[[
+	Marks the config store ready and releases everything waiting on it, once. The composer calls
+	this after applying every configuration from a bootstrap payload.
+
+	Readiness is deliberately not set per config. ApplyConfigs runs once per configuration, so
+	flipping the flag there released consumers, and fired every OnReady callback, as soon as the
+	first one was applied: Configs:Get on any later configuration then read a nil view. An app with
+	no configurations at all never became ready under that rule either, which the v2 backend treats
+	as a legitimate state.
+]]
+function InternalConfigs:SetReady()
+	if ConfigsReady then
+		return
+	end
+
+	ConfigsReady = true
+	ConfigReadySignal:Fire(self:GetAll(nil))
 end
 
 function InternalConfigs:WaitForConfigsReady() : true
@@ -177,7 +266,7 @@ function InternalConfigs:OnChanged(player: Player?, targetConfig : string | {str
 	end
 
 	-- Establish bindable connection
-	return BatchConfigUpdatedSignal:Connect(function(updatedPlayer: Player?, changes : {{path : {string}, newValue : any, oldValue : any}}, oldConfigs : any)
+	return BatchConfigUpdatedSignal:Connect(function(updatedPlayer: Player?, configId: number, changes : {{path : {string}, newValue : any, oldValue : any}}, oldConfigs : any)
 		local isServerChange = (updatedPlayer == nil)
 
 		-- If subscribed to server changes, ignore player-specific changes
@@ -185,21 +274,28 @@ function InternalConfigs:OnChanged(player: Player?, targetConfig : string | {str
 			return
 		end
 
-		-- If subscribed to player changes, only fire for server if no player-specific config is set
+		-- If subscribed to player changes, only fire for server if no player-specific view is set
 		if player and isServerChange then
-			if ActiveConfigs.DevConfigsByPlayer[player] then
+			local entry = ActiveConfigs[configId]
+			if entry and entry.viewByPlayer[player] then
 				return
 			end
 		elseif player and updatedPlayer ~= player then
 			return
 		end
 
+		-- Resolve the target identifier at fire time so subscriptions can precede config load
+		if ResolveConfigId(targetConfig[1]) ~= configId then
+			return
+		end
+
 		for _, change in changes do
 			local match = true
-			for index, path in targetConfig do
-				if change.path[index] == nil then
+			for index = 2, #targetConfig do
+				local changeSegment = change.path[index - 1]
+				if changeSegment == nil then
 					break
-				elseif path ~= change.path[index] then
+				elseif targetConfig[index] ~= changeSegment then
 					match = false
 					break
 				end
@@ -258,80 +354,113 @@ function InternalConfigs:_checkConfigChanged(oldConfig, newConfig) : { {path : {
 	return changedBatch
 end
 
-function InternalConfigs:ApplyInternalConfigs(newGBConfigs)
-	-- Split internally used metadata from dev facing configs
-	for index, value in newGBConfigs do
-		ActiveConfigs.GBConfigs[index] = value
-	end
+-- Registers or updates a configuration's base document from a v2 payload.
+-- Does not diff or replicate; evaluated views are composed and applied separately.
+-- Returns the previous privacy paths when updating, for privacy transition diffing.
+function InternalConfigs:SetBaseConfig(configData : {[string] : any}) : { { string } }?
+	local existing = ActiveConfigs[configData.id]
+	local oldPrivacy = existing and existing.privacy or nil
 
-	-- Note: In the future, check to see if the event data actually changed from the internal config update.
-	--EventDataUpdatedRemote:FireAllClients(newConfigs["GBEventData"])
+	local entry = existing or {
+		viewByPlayer = {},
+	}
+
+	entry.id = configData.id
+	entry.name = configData.name
+	entry.alias = configData.alias
+	entry.hash = configData.hash
+	entry.updatedAt = configData.updatedAt
+	entry.base = configData.configuration or {}
+	entry.privacy = configData.privacy or {}
+
+	ActiveConfigs[configData.id] = entry
+	RebuildIdentifierMap()
+
+	return oldPrivacy
 end
 
-local function addRootmostPathToSet(rootmostPathSet: {[string]: {string}?}, newPath: {string}): ()
-	if #newPath == 0 then
-		table.clear(rootmostPathSet)
-	end
-
-	-- Build hash key from path, escaping segment delimiter in case user-defined path contains it
-	local escapedNewPath: {string} = table.create(#newPath)
-	for _, pathSegment in newPath do
-		table.insert(escapedNewPath, (pathSegment:gsub("\\", "\\\\"):gsub("%.", "\\.")))
-	end
-	local newPathKey = table.concat(escapedNewPath, ".")
-
-	-- If already exactly in set, skip adding
-	if rootmostPathSet[newPathKey] then
+-- Refreshes a config's consumer identity (alias/name) when it changed without a content change.
+function InternalConfigs:UpdateConfigIdentity(configId : number, name : string?, alias : string?)
+	local entry = ActiveConfigs[configId]
+	if not entry then
 		return
 	end
 
-	-- Check if existing paths cover new path
-	for existingPathKey in rootmostPathSet do
-		if string.sub(newPathKey, 1, #existingPathKey) == existingPathKey then
-			
-			-- If new one is higher-level than existing, replace it
-			if #newPathKey < #existingPathKey then
-				rootmostPathSet[existingPathKey] = nil
-				rootmostPathSet[newPathKey] = newPath
-				return
-
-			-- If existing is higher-level than new, skip adding
-			else
-				return
-			end
-		end
+	if entry.name ~= name or entry.alias ~= alias then
+		entry.name = name
+		entry.alias = alias
+		RebuildIdentifierMap()
 	end
-
-	-- If no existing paths cover new path, add it to the set
-	rootmostPathSet[newPathKey] = newPath
 end
 
-function InternalConfigs:ApplyConfigs(player: Player?, newConfigs: {[string]: any}?, privacyConfig : { {string} }?, init : boolean?)
+-- Removes a configuration that no longer exists on the backend.
+-- Applies empty views first so subscribers and clients observe the removal.
+function InternalConfigs:RemoveConfig(configId : number)
+	local entry = ActiveConfigs[configId]
+	if not entry then
+		return
+	end
+
+	for player in entry.viewByPlayer do
+		self:ApplyConfigs(player, configId, nil)
+	end
+	self:ApplyConfigs(nil, configId, {})
+
+	ActiveConfigs[configId] = nil
+	RebuildIdentifierMap()
+end
+
+function InternalConfigs:GetBaseConfig(configId : number) : ConfigEntry?
+	return ActiveConfigs[configId]
+end
+
+function InternalConfigs:GetConfigHashes() : { [number] : string }
+	local hashes = {}
+	for configId, entry in ActiveConfigs do
+		hashes[configId] = entry.hash
+	end
+	return hashes
+end
+
+-- Returns evaluated views for every registered config, keyed by consumer identifier.
+function InternalConfigs:GetAll(player : Player?) : { [string] : any }
+	local views = {}
+	for _, entry in ActiveConfigs do
+		views[GetIdentifierForEntry(entry)] = player
+			and entry.viewByPlayer[player]
+			or entry.serverView
+	end
+	return views
+end
+
+-- Applies an evaluated view for a config. `player == nil` applies the server view;
+-- a nil `newView` for a player clears their override so they fall back to the server view.
+-- `oldPrivacy` is only passed when the config's base just changed, to diff privacy transitions.
+function InternalConfigs:ApplyConfigs(player: Player?, configId : number, newView: {[string]: any}?, init : boolean?, oldPrivacy : { {string} }?)
+	local entry = ActiveConfigs[configId]
+	if not entry then
+		Utilities.GBWarn("Cannot apply configs for unknown config id:", configId)
+		return
+	end
+
 	if not player then
-		assert(newConfigs, "Server configs cannot be cleared")
-		assert(privacyConfig, "Server config privacy cannot be cleared")
+		assert(newView, "Server configs cannot be cleared")
+	end
+
+	-- Departed players just have their view cleared; there is nobody to notify or replicate to
+	if player and player.Parent == nil then
+		entry.viewByPlayer[player] = nil
+		return
 	end
 
 	local oldConfigs = Utilities.recursiveCopy(player
-		and ActiveConfigs.DevConfigsByPlayer[player]
-		or ActiveConfigs.DevConfigs
+		and entry.viewByPlayer[player]
+		or entry.serverView
+		or {}
 	)
-	local oldPrivatePaths = player
-		and CurrentClientPrivacyByPlayer[player]
-		or CurrentClientPrivacy
+	local oldPrivatePaths = oldPrivacy or entry.privacy
+	local privacyConfig = entry.privacy
 
-	if player then
-		CurrentClientPrivacyByPlayer[player] = privacyConfig
-	else
-		CurrentClientPrivacy = privacyConfig
-	end
-	-- We can't recurse over a "config metadata object" unless we make a reserved key for the metadata and preserve the structure of the config object
-	-- Create a config-wide metadata key to avoid collisions with config object structure.
-	-- Can store metadata + key in configs mod in the future if there's other relevant metadata we want to access at any time.
-	--local metadataKey = httpService:GenerateGUID(false)
-	--local configMetadata = {}
-
-	
 	-- Freeze new configs to prevent modification
 	local function recursiveFreeze(configs)
 		if not table.isfrozen(configs) then
@@ -344,29 +473,26 @@ function InternalConfigs:ApplyConfigs(player: Player?, newConfigs: {[string]: an
 		end
 	end
 
-	if newConfigs then
-		recursiveFreeze(newConfigs)
+	if newView then
+		recursiveFreeze(newView)
 	end
 
 	if player then
-		ActiveConfigs.DevConfigsByPlayer[player] = newConfigs
+		entry.viewByPlayer[player] = newView
 
-		-- If per-player config is being cleared, revert to global config
-		if newConfigs == nil then
-			newConfigs = ActiveConfigs.DevConfigs
-		end
-		if privacyConfig == nil then
-			privacyConfig = CurrentClientPrivacy
+		-- If per-player view is being cleared, revert to the server view
+		if newView == nil then
+			newView = entry.serverView
 		end
 	else
-		ActiveConfigs.DevConfigs = newConfigs
+		entry.serverView = newView
 	end
 
 	if init ~= true then
-		local changedBatch = InternalConfigs:_checkConfigChanged(oldConfigs, newConfigs)
+		local changedBatch = InternalConfigs:_checkConfigChanged(oldConfigs, newView)
 
 		if #changedBatch > 0 then
-			BatchConfigUpdatedSignal:Fire(player, changedBatch, oldConfigs)
+			BatchConfigUpdatedSignal:Fire(player, configId, changedBatch, oldConfigs)
 		end
 
 		-- When public paths become private, queue scrubbing their rootmost value
@@ -409,7 +535,7 @@ function InternalConfigs:ApplyConfigs(player: Player?, newConfigs: {[string]: an
 			})
 		end
 		for _, newlyPublicPath in newlyPublicPathsToRepopulateSet do
-			local valueAtNewlyPublicPath = Utilities.getValueAtPath(newConfigs, newlyPublicPath)
+			local valueAtNewlyPublicPath = Utilities.getValueAtPath(newView, newlyPublicPath)
 
 			-- If not present in new configs, skip redundant send
 			if valueAtNewlyPublicPath == nil then
@@ -433,33 +559,21 @@ function InternalConfigs:ApplyConfigs(player: Player?, newConfigs: {[string]: an
 			end
 
 			if player then
-				ConfigChangedRemote:FireClient(player, filteredChanges)
+				ConfigChangedRemote:FireClient(player, configId, filteredChanges)
 			else
-				-- Only send server config changes to players who don't have individually-defined
+				-- Only send server config changes to players who don't have individually-defined views
 				for _, potentialPlayer in Players:GetPlayers() do
-					if not ActiveConfigs.DevConfigsByPlayer[potentialPlayer] then
-						ConfigChangedRemote:FireClient(potentialPlayer, filteredChanges)
+					if not entry.viewByPlayer[potentialPlayer] then
+						ConfigChangedRemote:FireClient(potentialPlayer, configId, filteredChanges)
 					end
 				end
 			end
 		end
 	end
-
-	
-	-- Freeze highest level table not referenced in traversal
-	
-	--shared.GBMod("InternalConfigs").clientConfigs = newClientConfigs
-	---- Freeze highest level table not referenced in traversal
-	--table.freeze(clientConfigs)
-	
-	--TODO:
-	ConfigsReady = true
-
-	ConfigReadySignal:Fire(newConfigs)
-	--ConfigUpdatedSignal:Fire(path, newValue, oldValue)
 end
 
--- Get the value of a specific config
+-- Get the value of a specific config. The first path segment identifies the config
+-- by alias, name, or id; the remaining segments traverse its evaluated view.
 function InternalConfigs:Get(player: Player?, path : string | { string }, configsOverride : any?) : any
 	if typeof(path) ~= "table" and typeof(path) ~= "string" then
 		Utilities.GBWarn("Config path must be a string or list of strings.")
@@ -467,73 +581,74 @@ function InternalConfigs:Get(player: Player?, path : string | { string }, config
 	end
 
 	path = typeof(path) == "string" and {path} or path
-	
-	if not configsOverride then
-		self:WaitForConfigsReady()
+
+	if #path == 0 then
+		Utilities.GBWarn("Config path must begin with a configuration name or alias.")
+		return nil
 	end
 
-	local configs = player
-		and ActiveConfigs.DevConfigsByPlayer[player]
-		or ActiveConfigs.DevConfigs
+	-- Overrides are config-local documents (e.g. old configs in OnChanged), so the
+	-- identifier segment is skipped rather than resolved.
+	if configsOverride then
+		local value = configsOverride
+		for index = 2, #path do
+			value = value[path[index]]
 
-	local value = configsOverride or configs
-	for _, key in ipairs(path) do
-		value = value[key]
+			if value == nil then
+				return nil
+			end
+		end
 
+		return value
+	end
+
+	self:WaitForConfigsReady()
+
+	local configId = ResolveConfigId(path[1])
+	if not configId then
+		Utilities.GBWarn("No Gamebeast config found matching \"".. tostring(path[1]).. "\"")
+		return nil
+	end
+
+	local entry = ActiveConfigs[configId]
+	local value = player
+		and entry.viewByPlayer[player]
+		or entry.serverView
+
+	for index = 2, #path do
 		if value == nil then
 			return nil
 		end
+		value = value[path[index]]
 	end
 
 	return value
 end
 
-function InternalConfigs:GetActiveConfig(key : string) : any
-	return ActiveConfigs[key]
-end
-
--- Get the value of a specific event
-function InternalConfigs:GetEventData(eventName : string) : { [string] : any }
-	local info = ActiveConfigs.GBConfigs.GBEventData[eventName]
-	
-	if not info then
-		Utilities.GBWarn("No Gamebeast event named ".. eventName)
-	end
-	
-	return info
-end
-
 --= Initializers =--
 function InternalConfigs:Init()
 
-	-- Call Get for clients and return value.
-	GetConfigRemoteFunc.OnServerInvoke = function (player: Player, path: {string}?)
+	-- Provide clients their full privacy-filtered config payload.
+	GetConfigRemoteFunc.OnServerInvoke = function (player: Player)
 		self:WaitForConfigsReady()
 
-		local privatePaths = CurrentClientPrivacyByPlayer[player] or CurrentClientPrivacy
-
-		if path == nil then
-			local playerConfig = player
-				and ActiveConfigs.DevConfigsByPlayer[player]
-				or ActiveConfigs.DevConfigs
-			return FilterConfigForClient({}, playerConfig, privatePaths)
+		local configs = {}
+		-- The single identifier each config is keyed by for consumers. ConfigIdByIdentifier holds
+		-- every spelling (id, name and alias all resolve), so a client keying its own payload off it
+		-- listed the same document up to three times where the server listed it once.
+		local identifierByConfigId = {}
+		for configId, entry in ActiveConfigs do
+			local view = entry.viewByPlayer[player] or entry.serverView
+			configs[tostring(configId)] = FilterConfigForClient({}, view, entry.privacy)
+			identifierByConfigId[tostring(configId)] = GetIdentifierForEntry(entry)
 		end
 
-		if IsPathPrivate(path, privatePaths) then
-			return nil
-		end
-
-		return FilterConfigForClient(path, self:Get(player, path), privatePaths)
-		-- NOTE: We'll want to modify to reflect privacy. To be most efficient, we can create a get function that references a
-		-- "client" config set that essentially recursively copies the set of configs only assigning a value if it has client accessibility.
-		-- This means we only every make one copy of a table rather than on every client request.
-		--return configsMod.get(path, configsMod.clientConfigs)
+		return {
+			idByIdentifier = ConfigIdByIdentifier,
+			identifierByConfigId = identifierByConfigId,
+			configs = configs,
+		}
 	end
-
-	-- Call GetEventData for clients and return value
-	--[[GetEventDataRemoteFunc.OnServerInvoke = function(_)
-		return ActiveConfigs.GBConfigs.GBEventData
-	end]]
 end
 
 --= Return Module =--

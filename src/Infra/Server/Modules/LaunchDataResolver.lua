@@ -79,28 +79,50 @@ function LaunchDataResolver:Init()
         end
 
         local joinData = player:GetJoinData()
-        local launchData = joinData.LaunchData
+        local rawLaunchData = joinData.LaunchData
         local attemptCount = 0
 
-        while attemptCount < 10 and launchData == "" do
+        while attemptCount < 10 and rawLaunchData == "" do
             task.wait(0.5)
             attemptCount += 1
 
             local latestJoinData = player:GetJoinData()
-            launchData = latestJoinData.LaunchData
+            rawLaunchData = latestJoinData.LaunchData
         end
 
-        if launchData ~= "" then
-            local success, launchDataJson = pcall(function()
-                return HttpService:JSONDecode(launchData)
+        if rawLaunchData ~= "" then
+            -- Attempt a base64 decode. The service is fetched here rather than at module scope so
+            -- that an engine without it costs us base64 support, not the whole SDK: this module is
+            -- required in a loop that has no error handling around it.
+            local base64Decoded, launchDataBuffer = pcall(function()
+                return game:GetService("EncodingService"):Base64Decode(buffer.fromstring(rawLaunchData))
             end)
 
-            if success then
-                ResolveData(player, launchDataJson)
-                return
-            else
-                Utilities.GBLog("Failed to decode launch data JSON for player " .. player.Name .. ": " .. tostring(launchDataJson))
+            local function decodeJson(value : string)
+                return pcall(function()
+                    return HttpService:JSONDecode(value)
+                end)
             end
+
+            -- Prefer the decoded form, then fall back to the raw string. Launch data that happens
+            -- to be base64-legal (a bare number, say) decodes to bytes that are not JSON, and
+            -- taking the decode as final dropped data that parsed perfectly well as it was sent.
+            local candidates = if base64Decoded
+                then { buffer.tostring(launchDataBuffer), rawLaunchData }
+                else { rawLaunchData }
+
+            local lastError
+            for _, candidate in candidates do
+                local success, launchDataJson = decodeJson(candidate)
+                if success then
+                    ResolveData(player, launchDataJson)
+                    return
+                end
+
+                lastError = launchDataJson
+            end
+
+            Utilities.GBLog("Failed to decode launch data JSON for player " .. player.Name .. ": " .. tostring(lastError))
         end
 
         ResolveData(player, nil)

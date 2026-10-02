@@ -88,6 +88,7 @@ function Schema:Sanitize(data : {[string] : any})
     for key, value in pairs(data) do
         if self._structure[key] == nil then
             data[key] = nil -- Remove keys not in the schema
+            continue
         end
 
         if not self._structure[key].type[type(value)] then

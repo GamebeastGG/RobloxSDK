@@ -2,15 +2,10 @@
 -- All rights reserved.
 
 local marketplaceService = game:GetService("MarketplaceService")
-local messagingService = game:GetService("MessagingService")
 local httpService = game:GetService("HttpService")
 local runService = game:GetService("RunService")
 
 local DataCache = shared.GBMod("DataCache")
-
-local MessagingServiceDebugCache = {} :: { [string]: number }
-local MessagingServiceRequestTimestamps = {}
-local LastMessageTime = nil
 
 local utilities = {}
 
@@ -213,41 +208,6 @@ end
 -- Round num to nearest specified increment. Roblox changes may have made less numerically stable, resulting in some odd floating point errors in limited instances
 utilities.roundNum = function(num, nearest)
 	return math.floor(0.5 + (num / nearest)) / (1 / nearest)
-end
-
--- Publish message with messaging service with promise wrapper. All MessageService messages go through here for potential usage monitoring.
-utilities.publishMessage = function(channel, message)
-	local success, errorMessage = utilities:PCallRetry(1, function()
-		MessagingServiceDebugCache[channel] = (MessagingServiceDebugCache[channel] or 0) + 1
-		messagingService:PublishAsync(channel, message)
-	end)
-
-	-- Measure request rate for potential throttling issues
-	local avg = 0
-	if LastMessageTime then
-		local timeSinceLastMessage = os.clock() - LastMessageTime
-
-		table.insert(MessagingServiceRequestTimestamps, { Time = timeSinceLastMessage })
-		if #MessagingServiceRequestTimestamps > 100 then
-			table.remove(MessagingServiceRequestTimestamps, 1)
-		end
-
-		for _, entry in MessagingServiceRequestTimestamps do
-			avg += entry.Time
-		end
-
-		avg = 60 / (avg / #MessagingServiceRequestTimestamps)
-	end
-
-	if not success then
-		utilities.GBWarn(
-			`Failed to publish message to channel: {channel} (Req count on channel: {MessagingServiceDebugCache[channel]}, Avg. total req/min: {math.round(
-				avg
-			)}) with error: {errorMessage}`
-		)
-	else
-		LastMessageTime = os.clock()
-	end
 end
 
 --- Returns an array of all values found in the given table, regardless of key type.
