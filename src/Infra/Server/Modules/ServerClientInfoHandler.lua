@@ -44,12 +44,6 @@ local ClientInfoChangedSignal = Signal.new({ copyArguments = false })
 -- Longest string a client may report for any client info value
 local MAX_CLIENT_STRING_LENGTH = 64
 
--- Shortest time between two client info updates applied for one player. Each one fans out to a
--- listener per player in the server, so a client spamming the remote multiplied its cost by the
--- player count. Reports inside the window are coalesced and the newest applied when it ends; the
--- client always sends its full info, so nothing is lost.
-local MIN_CLIENT_INFO_INTERVAL = 0.5
-
 -- The values the backend's targeting knows for each client-reported field
 local CLIENT_INFO_VOCABULARIES = {
     inputType = { keyboard = true, gamepad = true, touch = true, unknown = true },
@@ -99,8 +93,6 @@ local DefaultInfo = Schema.new({
 --= Variables =--
 
 local ClientInfoCache = ServerGate:GetCache()
--- Per player: when an info report was last applied, and the newest one waiting for its window
-local ClientInfoThrottleByPlayer = ServerGate:GetCache()
 
 --= Public Variables =--
 
@@ -173,40 +165,6 @@ local function UpdateClientInfoCache(player : Player, updatedInfo : { [string] :
 
     if isNew then
         ClientInfoResolvedSignal:Fire(player, ClientInfoCache[player])
-    end
-end
-
--- Handles a client's info report, applying at most one per MIN_CLIENT_INFO_INTERVAL per player
-local function OnClientInfoReported(player : Player, updatedInfo : any)
-    if type(updatedInfo) ~= "table" then
-        return
-    end
-
-    local throttle = ClientInfoThrottleByPlayer[player]
-    if not throttle then
-        throttle = { lastApplied = -math.huge, pending = nil }
-        ClientInfoThrottleByPlayer[player] = throttle
-    end
-
-    local remaining = MIN_CLIENT_INFO_INTERVAL - (os.clock() - throttle.lastApplied)
-    if remaining <= 0 then
-        throttle.lastApplied = os.clock()
-        UpdateClientInfoCache(player, updatedInfo)
-        return
-    end
-
-    -- Inside the window: keep only the newest report, and apply it when the window ends
-    local isScheduled = throttle.pending ~= nil
-    throttle.pending = updatedInfo
-    if not isScheduled then
-        task.delay(remaining, function()
-            local pending = throttle.pending
-            throttle.pending = nil
-            if pending and player.Parent then
-                throttle.lastApplied = os.clock()
-                UpdateClientInfoCache(player, pending)
-            end
-        end)
     end
 end
 
@@ -364,7 +322,7 @@ function ServerClientInfoHandler:Init()
         ClientInfoResolvedSignal:Fire(player, nil)
     end)
 
-    ClientInfoRemote.OnServerEvent:Connect(OnClientInfoReported)
+    ClientInfoRemote.OnServerEvent:Connect(UpdateClientInfoCache)
 end
 
 --= Return Module =--

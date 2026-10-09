@@ -58,18 +58,17 @@ local BatchConfigUpdatedSignal = Signal.new({ copyArguments = false })
 
 --= Constants =--
 
---[[
-	Shortest time between two config payload fetches by one player. A client fetches once at join and
-	again only when it meets a config it doesn't know, so anything faster comes from a modified
-	client; each fetch copied and filtered every config, and before configs were ready each parked
-	another thread.
-]]
-local MIN_CONFIG_FETCH_INTERVAL = 2
-
 --= Variables =--
 
--- Per player: whether a payload fetch is in progress, and when the last one was served
-local ConfigFetchStateByPlayer = ServerGate:GetCache()
+--[[
+	Clients' config payloads, kept until a view or identifier changes. Building one copies and
+	privacy-filters every config; built per fetch, every join paid that, and so did every call from a
+	client invoking the remote in a loop. Players who share the server's views share one payload;
+	players with views of their own (per-player experiments) get their own.
+]]
+local ClientPayloadVersion = 0
+local SharedClientPayload : { version : number, payload : any }? = nil
+local ClientPayloadByPlayer = ServerGate:GetCache()
 
 local ConfigsReady = false
 local ActiveConfigs = {} :: { [number] : ConfigEntry }
@@ -136,6 +135,8 @@ local function RebuildIdentifierMap()
 		end
 	end
 
+	-- Payloads carry these maps
+	ClientPayloadVersion += 1
 	QueueIdentityBroadcast()
 end
 
@@ -265,6 +266,48 @@ local function addRootmostPathToSet(rootmostPathSet: {[string]: {string}?}, newP
 
 	-- If no existing paths cover new path, add it to the set
 	rootmostPathSet[newPathKey] = newPath
+end
+
+-- Builds a client's privacy-filtered config payload from its current views
+local function BuildClientPayload(player : Player)
+	local configs = {}
+	for configId, entry in ActiveConfigs do
+		local view = entry.viewByPlayer[player] or entry.serverView
+		configs[tostring(configId)] = FilterConfigForClient({}, view, entry.privacy)
+	end
+
+	-- identifierByConfigId keys each config once for consumers. ConfigIdByIdentifier holds every
+	-- spelling (id, name and alias all resolve), so a client keying its own payload off it listed
+	-- the same document up to three times where the server listed it once.
+	return {
+		idByIdentifier = table.clone(ConfigIdByIdentifier),
+		identifierByConfigId = BuildIdentifierByConfigId(),
+		configs = configs,
+	}
+end
+
+-- A client's payload, from the cache when nothing has changed since it was built
+local function GetClientPayload(player : Player)
+	local hasOwnViews = false
+	for _, entry in ActiveConfigs do
+		if entry.viewByPlayer[player] then
+			hasOwnViews = true
+			break
+		end
+	end
+
+	local cached = if hasOwnViews then ClientPayloadByPlayer[player] else SharedClientPayload
+	if cached and cached.version == ClientPayloadVersion then
+		return cached.payload
+	end
+
+	local entry = { version = ClientPayloadVersion, payload = BuildClientPayload(player) }
+	if hasOwnViews then
+		ClientPayloadByPlayer[player] = entry
+	else
+		SharedClientPayload = entry
+	end
+	return entry.payload
 end
 
 --= API Functions =--
@@ -498,6 +541,9 @@ function InternalConfigs:ApplyConfigs(player: Player?, configId : number, newVie
 		assert(newView, "Server configs cannot be cleared")
 	end
 
+	-- Any view or privacy change makes the cached client payloads stale
+	ClientPayloadVersion += 1
+
 	-- Departed players just have their view cleared; there is nobody to notify or replicate to
 	if player and player.Parent == nil then
 		entry.viewByPlayer[player] = nil
@@ -688,42 +734,8 @@ function InternalConfigs:Init()
 
 	-- Provide clients their full privacy-filtered config payload.
 	GetConfigRemoteFunc.OnServerInvoke = function (player: Player)
-		-- One fetch at a time per player, at most one every MIN_CONFIG_FETCH_INTERVAL. A legitimate
-		-- re-pull that comes too soon is delayed rather than refused, so it still gets its data.
-		local fetchState = ConfigFetchStateByPlayer[player]
-		if not fetchState then
-			fetchState = { inFlight = false, lastServed = -math.huge }
-			ConfigFetchStateByPlayer[player] = fetchState
-		end
-		if fetchState.inFlight then
-			return nil
-		end
-		fetchState.inFlight = true
-
-		local sinceLast = os.clock() - fetchState.lastServed
-		if sinceLast < MIN_CONFIG_FETCH_INTERVAL then
-			task.wait(MIN_CONFIG_FETCH_INTERVAL - sinceLast)
-		end
-
 		self:WaitForConfigsReady()
-
-		fetchState.inFlight = false
-		fetchState.lastServed = os.clock()
-
-		local configs = {}
-		for configId, entry in ActiveConfigs do
-			local view = entry.viewByPlayer[player] or entry.serverView
-			configs[tostring(configId)] = FilterConfigForClient({}, view, entry.privacy)
-		end
-
-		-- identifierByConfigId keys each config once for consumers. ConfigIdByIdentifier holds every
-		-- spelling (id, name and alias all resolve), so a client keying its own payload off it listed
-		-- the same document up to three times where the server listed it once.
-		return {
-			idByIdentifier = ConfigIdByIdentifier,
-			identifierByConfigId = BuildIdentifierByConfigId(),
-			configs = configs,
-		}
+		return GetClientPayload(player)
 	end
 end
 
