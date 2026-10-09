@@ -23,6 +23,7 @@ local Utilities = require(script.Parent.Utilities)
 local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote)
 local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal)
 local SignalConnection = require(script.Parent.Parent.Parent.Shared.Modules.Signal.SignalConnection)
+local ServerGate = require(script.Parent.ServerGate)
 
 --= Types =--
 
@@ -57,7 +58,18 @@ local BatchConfigUpdatedSignal = Signal.new({ copyArguments = false })
 
 --= Constants =--
 
+--[[
+	Shortest time between two config payload fetches by one player. A client fetches once at join and
+	again only when it meets a config it doesn't know, so anything faster comes from a modified
+	client; each fetch copied and filtered every config, and before configs were ready each parked
+	another thread.
+]]
+local MIN_CONFIG_FETCH_INTERVAL = 2
+
 --= Variables =--
+
+-- Per player: whether a payload fetch is in progress, and when the last one was served
+local ConfigFetchStateByPlayer = ServerGate:GetCache()
 
 local ConfigsReady = false
 local ActiveConfigs = {} :: { [number] : ConfigEntry }
@@ -676,7 +688,27 @@ function InternalConfigs:Init()
 
 	-- Provide clients their full privacy-filtered config payload.
 	GetConfigRemoteFunc.OnServerInvoke = function (player: Player)
+		-- One fetch at a time per player, at most one every MIN_CONFIG_FETCH_INTERVAL. A legitimate
+		-- re-pull that comes too soon is delayed rather than refused, so it still gets its data.
+		local fetchState = ConfigFetchStateByPlayer[player]
+		if not fetchState then
+			fetchState = { inFlight = false, lastServed = -math.huge }
+			ConfigFetchStateByPlayer[player] = fetchState
+		end
+		if fetchState.inFlight then
+			return nil
+		end
+		fetchState.inFlight = true
+
+		local sinceLast = os.clock() - fetchState.lastServed
+		if sinceLast < MIN_CONFIG_FETCH_INTERVAL then
+			task.wait(MIN_CONFIG_FETCH_INTERVAL - sinceLast)
+		end
+
 		self:WaitForConfigsReady()
+
+		fetchState.inFlight = false
+		fetchState.lastServed = os.clock()
 
 		local configs = {}
 		for configId, entry in ActiveConfigs do

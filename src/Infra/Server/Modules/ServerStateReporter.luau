@@ -22,6 +22,7 @@ local MetricCollector = require(script.Parent.Parent.Parent.Shared.Modules.Metri
 local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote) ---@module GetRemote
 local Utilities = require(script.Parent.Utilities) ---@module Utilities
 local DataCache = require(script.Parent.Parent.Parent.Shared.Modules.DataCache)
+local ServerGate = require(script.Parent.ServerGate) ---@module ServerGate
 
 --= Types =--
 type ClientMetricReport = {
@@ -35,6 +36,10 @@ local ExportMetricsRemote = GetRemote("Event", "ExportClientMetrics")
 
 --= Constants =--
 local PROBE_FREQUENCY = 1 -- seconds
+-- Shortest time between two metric reports accepted from one client. The client reports every 10s;
+-- unthrottled, one client firing hundreds of reports a second grew the metric history without bound
+-- until the next server report, and set the reported ping and fps percentiles.
+local MIN_CLIENT_METRICS_INTERVAL = 5 -- seconds
 -- How often the report loop re-derives its wait, so a lowered serverReportRate is picked up
 -- without sitting out a whole long interval first
 local REPORT_RECHECK_INTERVAL = 5 -- seconds
@@ -144,7 +149,20 @@ function ServerStateReporter:Init()
         end
     end)
 
+    local LastClientMetricsByPlayer = ServerGate:GetCache()
+
     ExportMetricsRemote.OnServerEvent:Connect(function(player : Player, metrics : ClientMetricReport)
+        if type(metrics) ~= "table" or type(metrics.PhysicsFps) ~= "table" or type(metrics.Ping) ~= "table" then
+            return
+        end
+
+        local now = os.clock()
+        local lastReport = LastClientMetricsByPlayer[player]
+        if lastReport and now - lastReport < MIN_CLIENT_METRICS_INTERVAL then
+            return
+        end
+        LastClientMetricsByPlayer[player] = now
+
         -- only use the first 10 values
         -- this is because the client will report the history every 10 seconds,
         -- and probes every 1 second, so in theory it's always going to be 10 values
