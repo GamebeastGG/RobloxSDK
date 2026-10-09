@@ -60,6 +60,8 @@ export type CatalogUpdateSummary = {
 	newUserExperimentIds: { number },
 	newServerExperimentIds: { number },
 	removedExperimentIds: { number },
+	-- False when some listed experiment or group is still missing its changesets
+	complete: boolean,
 }
 
 --= Constants =--
@@ -236,6 +238,7 @@ function ExperimentCatalog:Update(experiments: ExperimentsByUnitType, requiredPr
 		newUserExperimentIds = {},
 		newServerExperimentIds = {},
 		removedExperimentIds = {},
+		complete = true,
 	}
 
 	-- Identify new experiments and unseen groups per unit type
@@ -289,10 +292,31 @@ function ExperimentCatalog:Update(experiments: ExperimentsByUnitType, requiredPr
 
 	-- A fetch that failed leaves its experiments out of the catalog. Reporting them as started
 	-- anyway had the caller re-assign every player in the server on every poll, for experiments it
-	-- still had no changesets to apply. They stay uncatalogued, so the next poll sees them as new
-	-- again and retries the fetch.
+	-- still had no changesets to apply. They stay uncatalogued and the summary says it is
+	-- incomplete, so the caller polls the full status again and the fetch is retried.
 	summary.newUserExperimentIds = filterToCatalogued(summary.newUserExperimentIds)
 	summary.newServerExperimentIds = filterToCatalogued(summary.newServerExperimentIds)
+
+	-- Judged on the result rather than on the fetches: a fetch answered 304 by a stale cache also
+	-- leaves an experiment missing. Its unit type's hash is dropped so the retry is unconditional.
+	for _, unitType in { "user" :: "user" | "server", "server" :: "user" | "server" } do
+		for _, meta in experiments[unitType] do
+			local state = Catalog[meta.id]
+			local isMissing = state == nil
+			if state then
+				for _, group in meta.groups do
+					if not state.changesetByGroupId[group.id] then
+						isMissing = true
+					end
+				end
+			end
+
+			if isMissing then
+				summary.complete = false
+				ActiveHashByUnitType[unitType] = nil
+			end
+		end
+	end
 
 	return summary
 end

@@ -284,12 +284,17 @@ end
 
 -- Applies a status poll payload: refetches configs whose hash changed, removes
 -- configs that disappeared, and reconciles the experiment catalog.
-function Updater:ApplyStatus(status)
+--
+-- Returns whether everything in the payload was applied. When a refetch fails, or a stale cache
+-- answers it with an old version, the caller must not keep this snapshot's hash: sent back, it
+-- would have every later poll answered 304 and the change would never be retried.
+function Updater:ApplyStatus(status) : boolean
 	-- Read before the refetches below, so a directive shedding load still lands if they fail
 	self:SetPollingDirective(status.polling)
 
 	local knownHashes = InternalConfigs:GetConfigHashes()
 	local seenConfigIds = {}
+	local isComplete = true
 
 	for _, configStatus in status.configurations do
 		seenConfigIds[configStatus.id] = true
@@ -304,6 +309,8 @@ function Updater:ApplyStatus(status)
 		-- stores them); a name slugs to the same value, so it serves as the fallback.
 		local configIdentifier = configStatus.alias or configStatus.name
 		if not configIdentifier then
+			-- Not counted as incomplete: retrying can't help until the config gets an alias or name,
+			-- which changes the status payload anyway
 			Utilities.GBWarn("Config", configStatus.id, "has no alias or name and cannot be refetched.")
 			continue
 		end
@@ -313,12 +320,16 @@ function Updater:ApplyStatus(status)
 			hash = knownHashes[configStatus.id],
 		})
 
+		-- The status says the content changed, so a 304 here comes from a cache that hasn't caught up
 		if statusCode == 304 then
+			Utilities.GBLog("Config", configStatus.id, "is not updated yet where it is fetched from; retrying next poll")
+			isComplete = false
 			continue
 		end
 
 		if not didSucceed or not configResp then
 			Utilities.GBWarn("Failed to fetch updated config:", configStatus.id)
+			isComplete = false
 			continue
 		end
 
@@ -328,7 +339,14 @@ function Updater:ApplyStatus(status)
 		-- against a non-conforming response rather than an expected path.
 		if type(configResp.hash) ~= "string" then
 			Utilities.GBWarn("Config", configStatus.id, "was returned without a hash and was not applied.")
+			isComplete = false
 			continue
+		end
+
+		-- Applied either way, since it is newer than what we hold, but a version other than the one
+		-- the status lists means the fetch hasn't caught up; the next poll checks again
+		if configResp.hash ~= configStatus.hash then
+			isComplete = false
 		end
 
 		-- The single-config response carries no alias; identity comes from the status payload
@@ -354,7 +372,11 @@ function Updater:ApplyStatus(status)
 		end
 	end
 
-	Experiments:UpdateCatalog(status.experiments, status.requiredProperties)
+	if not Experiments:UpdateCatalog(status.experiments, status.requiredProperties) then
+		isComplete = false
+	end
+
+	return isComplete
 end
 
 -- In the unlikely case GB is down, fall back on Roblox datastores
@@ -508,14 +530,19 @@ function Updater:Init()
 			elseif didSucceed and status then
 				-- Applied under pcall: an error in here used to kill this thread outright, leaving the
 				-- server silently frozen on its last known configs and experiments until it shut down
-				local didApply, applyError = pcall(self.ApplyStatus, self, status)
+				local didApply, applyResult = pcall(self.ApplyStatus, self, status)
 
-				if didApply then
+				if didApply and applyResult then
 					LastStatusHash = status.hash
+				elseif didApply then
+					-- Part of it didn't land (a refetch failed or was stale). Not keeping the hash makes
+					-- the next poll return the full snapshot, which retries exactly what is missing.
+					LastStatusHash = nil
+					Utilities.GBLog("Status poll applied in part; retrying the rest next poll")
 				else
 					-- Dropped so the next poll refetches the whole snapshot and tries again
 					LastStatusHash = nil
-					Utilities.GBWarn("Failed to apply the status poll:", applyError)
+					Utilities.GBWarn("Failed to apply the status poll:", applyResult)
 				end
 			else
 				Utilities.GBLog("Status poll failed, retrying next interval")

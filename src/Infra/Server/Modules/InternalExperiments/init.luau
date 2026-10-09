@@ -552,9 +552,12 @@ end
 	itself (server-unit). Removed experiments have their assignments stripped, firing
 	the changed signals so configs recompose.
 
+	Returns false when some experiment is still missing its changesets (a fetch failed),
+	so the caller knows the payload was not fully applied.
+
 	@canyield
 ]]
-function Experiments:UpdateCatalog(experiments: ExperimentsByUnitType, requiredProperties: { string }?)
+function Experiments:UpdateCatalog(experiments: ExperimentsByUnitType, requiredProperties: { string }?): boolean
 	startAssignmentRefresh()
 
 	local summary = ExperimentCatalog:Update(experiments, requiredProperties)
@@ -609,6 +612,8 @@ function Experiments:UpdateCatalog(experiments: ExperimentsByUnitType, requiredP
 	for player in changedPlayers do
 		Experiments.OnPlayerAssignmentsChanged:Fire(player)
 	end
+
+	return summary.complete
 end
 
 --[[
