@@ -25,7 +25,7 @@ local Changesets = { }
 
 --= Dependencies =--
 
-local Utilities = shared.GBMod("Utilities")
+local Utilities = require(script.Parent.Utilities)
 
 --= Types =--
 

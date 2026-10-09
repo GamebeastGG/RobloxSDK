@@ -17,11 +17,11 @@ local ServerStateReporter = {}
 local Players = game:GetService("Players")
 
 --= Dependencies =--
-local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
-local MetricCollector = shared.GBMod("MetricCollector") ---@module MetricCollector
-local GetRemote = shared.GBMod("GetRemote") ---@module GetRemote
-local Utilities = shared.GBMod("Utilities") ---@module Utilities
-local DataCache = shared.GBMod("DataCache")
+local GBRequests = require(script.Parent.GBRequests) ---@module GBRequests
+local MetricCollector = require(script.Parent.Parent.Parent.Shared.Modules.MetricCollector) ---@module MetricCollector
+local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote) ---@module GetRemote
+local Utilities = require(script.Parent.Utilities) ---@module Utilities
+local DataCache = require(script.Parent.Parent.Parent.Shared.Modules.DataCache)
 
 --= Types =--
 type ClientMetricReport = {

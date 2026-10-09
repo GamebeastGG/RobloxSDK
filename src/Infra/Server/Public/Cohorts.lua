@@ -17,7 +17,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 --= Dependencies =--
 
-local InternalCohorts = shared.GBMod("InternalCohorts") ---@module InternalCohorts
+local InternalCohorts = require(script.Parent.Parent.Modules.InternalCohorts) ---@module InternalCohorts
 
 --= Types =--
 

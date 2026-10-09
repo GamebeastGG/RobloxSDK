@@ -23,8 +23,8 @@ local ExperimentCatalog = { }
 
 --= Dependencies =--
 
-local GBRequests = shared.GBMod("GBRequests")
-local Utilities = shared.GBMod("Utilities")
+local GBRequests = require(script.Parent.Parent.GBRequests)
+local Utilities = require(script.Parent.Parent.Utilities)
 local Changesets = require(script.Parent.Parent.Changesets)
 
 --= Types =--

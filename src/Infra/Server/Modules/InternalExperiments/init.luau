@@ -27,14 +27,14 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local GBRequests = shared.GBMod("GBRequests")
-local DataCache = shared.GBMod("DataCache")
+local GBRequests = require(script.Parent.GBRequests)
+local DataCache = require(script.Parent.Parent.Parent.Shared.Modules.DataCache)
 local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal)
-local Utilities = shared.GBMod("Utilities")
-local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
-local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
-local Cleaner = shared.GBMod("Cleaner") ---@module Cleaner
+local Utilities = require(script.Parent.Utilities)
+local SignalConnection = require(script.Parent.Parent.Parent.Shared.Modules.Signal.SignalConnection) ---@module SignalConnection
+local ServerGate = require(script.Parent.ServerGate) ---@module ServerGate
+local ServerClientInfoHandler = require(script.Parent.ServerClientInfoHandler) ---@module ServerClientInfoHandler
+local Cleaner = require(script.Parent.Parent.Parent.Shared.Modules.Cleaner) ---@module Cleaner
 local Changesets = require(script.Parent.Changesets)
 local ExperimentCatalog = require(script.ExperimentCatalog)
 local AssignmentContext = require(script.AssignmentContext)

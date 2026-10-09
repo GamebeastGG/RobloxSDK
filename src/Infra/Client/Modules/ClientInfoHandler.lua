@@ -20,8 +20,8 @@ local MarketplaceService = game:GetService("MarketplaceService")
 
 --= Dependencies =--
 
-local GetRemote = shared.GBMod("GetRemote")
-local ClientSessionPreservation = shared.GBMod("ClientSessionPreservation") ---@module ClientSessionPreservation
+local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote)
+local ClientSessionPreservation = require(script.Parent.ClientSessionPreservation) ---@module ClientSessionPreservation
 
 --= Types =--
 

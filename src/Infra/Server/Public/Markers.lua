@@ -18,8 +18,8 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module EngagementMarkers
-local PurchaseAnalytics = shared.GBMod("PurchaseAnalytics") ---@module PurchaseAnalytics
+local EngagementMarkers = require(script.Parent.Parent.Modules.EngagementMarkers) ---@module EngagementMarkers
+local PurchaseAnalytics = require(script.Parent.Parent.Modules.InternalMarkers.PurchaseAnalytics) ---@module PurchaseAnalytics
 
 --= Types =--
 

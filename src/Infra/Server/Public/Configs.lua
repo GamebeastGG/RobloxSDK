@@ -18,7 +18,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 --= Dependencies =--
 
-local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
+local InternalConfigs = require(script.Parent.Parent.Modules.InternalConfigs) ---@module InternalConfigs
 
 --= Types =--
 

@@ -18,8 +18,8 @@ local VRService = game:GetService("VRService")
 
 --= Dependencies =--
 
-local ClientInfoHandler = shared.GBMod("ClientInfoHandler") ---@module ClientInfoHandler
-local Signal = shared.GBMod("Signal") ---@module Signal
+local ClientInfoHandler = require(script.Parent.ClientInfoHandler) ---@module ClientInfoHandler
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal) ---@module Signal
 
 --= Types =--
 

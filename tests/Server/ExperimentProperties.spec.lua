@@ -9,7 +9,7 @@
 
 return function()
     local Players = game:GetService("Players")
-    local AssignmentContext = shared.GBMod("AssignmentContext")
+    local AssignmentContext = require(game:GetService("ReplicatedStorage"):WaitForChild("Gamebeast").Infra.Server.Modules.InternalExperiments.AssignmentContext)
 
     local function clearServerProperties()
         for key in AssignmentContext:GetServerProperties() do
@@ -183,7 +183,7 @@ return function()
             local _, awaiting = AssignmentContext:GetForPlayers({ player.UserId }, { "roblox.country" })
             expect(#awaiting).to.equal(0)
 
-            local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler")
+            local ServerClientInfoHandler = require(game:GetService("ReplicatedStorage"):WaitForChild("Gamebeast").Infra.Server.Modules.ServerClientInfoHandler)
             local contextByPlayerId, awaitingInput = AssignmentContext:GetForPlayers({ player.UserId }, { "roblox.inputType" })
             if ServerClientInfoHandler:IsClientInfoResolved(player) then
                 expect(#awaitingInput).to.equal(0)

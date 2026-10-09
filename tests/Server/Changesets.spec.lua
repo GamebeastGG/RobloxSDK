@@ -7,7 +7,7 @@
 ]]
 
 return function()
-    local Changesets = shared.GBMod("Changesets")
+    local Changesets = require(game:GetService("ReplicatedStorage"):WaitForChild("Gamebeast").Infra.Server.Modules.Changesets)
 
     local function changeset(operations)
         return { operations = operations }

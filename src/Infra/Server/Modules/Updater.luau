@@ -24,14 +24,14 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local MetaData = shared.GBMod("MetaData") ---@module MetaData
-local DataCache = shared.GBMod("DataCache")
-local Utilities = shared.GBMod("Utilities")
-local GBRequests = shared.GBMod("GBRequests")
-local Changesets = shared.GBMod("Changesets") ---@module Changesets
-local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
-local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
-local DatatstoreBackup = shared.GBMod("DatastoreBackup") ---@module DatastoreBackup
+local MetaData = require(script.Parent.Parent.Parent.MetaData) ---@module MetaData
+local DataCache = require(script.Parent.Parent.Parent.Shared.Modules.DataCache)
+local Utilities = require(script.Parent.Utilities)
+local GBRequests = require(script.Parent.GBRequests)
+local Changesets = require(script.Parent.Changesets) ---@module Changesets
+local Experiments = require(script.Parent.InternalExperiments) ---@module InternalExperiments
+local InternalConfigs = require(script.Parent.InternalConfigs) ---@module InternalConfigs
+local DatatstoreBackup = require(script.Parent.DatastoreBackup) ---@module DatastoreBackup
 
 --= Types =--
 

@@ -27,9 +27,9 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local Signal = shared.GBMod("Signal") ---@module Signal
-local Utilities = shared.GBMod("Utilities") ---@module Utilities
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal) ---@module Signal
+local Utilities = require(script.Parent.Utilities) ---@module Utilities
+local ServerGate = require(script.Parent.ServerGate) ---@module ServerGate
 
 --= Types =--
 

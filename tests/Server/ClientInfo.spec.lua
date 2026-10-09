@@ -5,7 +5,7 @@
 ]]
 
 return function()
-    local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler")
+    local ServerClientInfoHandler = require(game:GetService("ReplicatedStorage"):WaitForChild("Gamebeast").Infra.Server.Modules.ServerClientInfoHandler)
 
     local function isValid(key, value)
         return ServerClientInfoHandler:IsValidClientInfo(key, value)

@@ -15,8 +15,8 @@ local ClientMetricExporter = {}
 local Players = game:GetService("Players")
 
 --= Dependencies =--
-local GetRemote = shared.GBMod("GetRemote")
-local MetricCollector = shared.GBMod("MetricCollector") ---@module MetricCollector
+local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote)
+local MetricCollector = require(script.Parent.Parent.Parent.Shared.Modules.MetricCollector) ---@module MetricCollector
 
 --= Types =--
 

@@ -18,13 +18,13 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local GetRemote = shared.GBMod("GetRemote")
-local Signal = shared.GBMod("Signal")
-local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
-local SignalTimeout = shared.GBMod("SignalTimeout") ---@module SignalTimeout
-local Schema = shared.GBMod("Schema") ---@module Schema
-local Utilities = shared.GBMod("Utilities") ---@module Utilities
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
+local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote)
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal)
+local GBRequests = require(script.Parent.GBRequests) ---@module GBRequests
+local SignalTimeout = require(script.Parent.Parent.Parent.Shared.Modules.SignalTimeout) ---@module SignalTimeout
+local Schema = require(script.Parent.Parent.Parent.Shared.Modules.Schema) ---@module Schema
+local Utilities = require(script.Parent.Utilities) ---@module Utilities
+local ServerGate = require(script.Parent.ServerGate) ---@module ServerGate
 
 --= Types =--
 

@@ -5,7 +5,7 @@
 
 return function()
     local Gamebeast = require(game:GetService("ReplicatedStorage"):WaitForChild("Gamebeast"))
-    local DataCache = shared.GBMod("DataCache")
+    local DataCache = require(game:GetService("ReplicatedStorage"):WaitForChild("Gamebeast").Infra.Shared.Modules.DataCache)
 
     local settings = DataCache:Get("Settings")
 

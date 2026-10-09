@@ -19,9 +19,9 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local Utilities = shared.GBMod("Utilities") ---@module Utilities
-local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
-local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
+local Utilities = require(script.Parent.Parent.Utilities) ---@module Utilities
+local EngagementMarkers = require(script.Parent.Parent.EngagementMarkers) ---@module Markers
+local ServerClientInfoHandler = require(script.Parent.Parent.ServerClientInfoHandler) ---@module ServerClientInfoHandler
 
 --= Types =--
 

@@ -20,9 +20,9 @@ local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
-local Utilities = shared.GBMod("Utilities") ---@module Utilities
-local Signal = shared.GBMod("Signal") ---@module Signal
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
+local Utilities = require(script.Parent.Utilities) ---@module Utilities
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal) ---@module Signal
+local ServerGate = require(script.Parent.ServerGate) ---@module ServerGate
 
 --= Types =--
 

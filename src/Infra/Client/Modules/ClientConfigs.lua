@@ -19,9 +19,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 --= Dependencies =--
 
-local GetRemote = shared.GBMod("GetRemote")
-local Signal = shared.GBMod("Signal")
-local SignalConnection = shared.GBMod("SignalConnection")
+local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote)
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal)
+local SignalConnection = require(script.Parent.Parent.Parent.Shared.Modules.Signal.SignalConnection)
 
 --= Types =--
 

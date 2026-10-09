@@ -19,10 +19,10 @@ local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
-local Utilities = shared.GBMod("Utilities")
-local DataCache = shared.GBMod("DataCache")
-local Signal = shared.GBMod("Signal") ---@module Signal
-local MetaData = shared.GBMod("MetaData") ---@module MetaData
+local Utilities = require(script.Parent.Utilities)
+local DataCache = require(script.Parent.Parent.Parent.Shared.Modules.DataCache)
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal) ---@module Signal
+local MetaData = require(script.Parent.Parent.Parent.MetaData) ---@module MetaData
 
 --= Types =--
 

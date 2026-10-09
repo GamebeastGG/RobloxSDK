@@ -404,18 +404,6 @@ function Gamebeast:UpdateSettings(sdkSettings : RuntimeSDKSettings)
 	end
 end
 
---= Initializers =--
-do
-	shared.GBMod = function(name : string)
-		local moduleData = GetModule(name)
-		if moduleData then
-			return RequireModule(moduleData)
-		else
-			--Utilities.GBWarn("Gamebeast module \"".. name.. "\" not found!")
-		end
-	end
-end
-
 --= Return Module =--
 
 return Gamebeast

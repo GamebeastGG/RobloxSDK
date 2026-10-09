@@ -4,8 +4,8 @@
 ]]
 
 return function()
-    local DataCache = shared.GBMod("DataCache")
-    local Updater = shared.GBMod("Updater")
+    local DataCache = require(game:GetService("ReplicatedStorage"):WaitForChild("Gamebeast").Infra.Shared.Modules.DataCache)
+    local Updater = require(game:GetService("ReplicatedStorage"):WaitForChild("Gamebeast").Infra.Server.Modules.Updater)
 
     local settings = DataCache:Get("Settings")
     local POLL_RATE = 30

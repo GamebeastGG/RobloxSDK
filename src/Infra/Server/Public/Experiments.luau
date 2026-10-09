@@ -16,7 +16,7 @@ local Experiments = { }
 
 --= Dependencies =--
 
-local InternalExperiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
+local InternalExperiments = require(script.Parent.Parent.Modules.InternalExperiments) ---@module InternalExperiments
 local Types = require(script.Parent.Parent.Parent.Types)
 
 --= Types =--

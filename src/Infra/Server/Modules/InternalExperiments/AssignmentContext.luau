@@ -26,10 +26,10 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local Utilities = shared.GBMod("Utilities")
-local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
-local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
+local Utilities = require(script.Parent.Parent.Utilities)
+local LocalizationCache = require(script.Parent.Parent.LocalizationCache) ---@module LocalizationCache
+local ServerClientInfoHandler = require(script.Parent.Parent.ServerClientInfoHandler) ---@module ServerClientInfoHandler
+local ServerGate = require(script.Parent.Parent.ServerGate) ---@module ServerGate
 
 --= Types =--
 

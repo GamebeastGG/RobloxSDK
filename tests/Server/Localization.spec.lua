@@ -5,7 +5,7 @@
 ]]
 
 return function()
-    local LocalizationCache = shared.GBMod("LocalizationCache")
+    local LocalizationCache = require(game:GetService("ReplicatedStorage"):WaitForChild("Gamebeast").Infra.Server.Modules.LocalizationCache)
 
     -- Resolves to "unknown" for both fields when the test server is empty, which covers the same
     -- paths without needing a player.

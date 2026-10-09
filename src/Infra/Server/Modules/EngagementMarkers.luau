@@ -20,19 +20,19 @@ local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
-local Timer = shared.GBMod("Timer") ---@module Timer
-local Signal = shared.GBMod("Signal") ---@module Signal
-local Cleaner = shared.GBMod("Cleaner")
-local Utilities = shared.GBMod("Utilities")
-local DataCache = shared.GBMod("DataCache")
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
-local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
-local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
-local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
-local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
-local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
-local LaunchDataResolver = shared.GBMod("LaunchDataResolver") ---@module LaunchDataResolver
-local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
+local Timer = require(script.Parent.Parent.Parent.Shared.Modules.Timer) ---@module Timer
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal) ---@module Signal
+local Cleaner = require(script.Parent.Parent.Parent.Shared.Modules.Cleaner)
+local Utilities = require(script.Parent.Utilities)
+local DataCache = require(script.Parent.Parent.Parent.Shared.Modules.DataCache)
+local ServerGate = require(script.Parent.ServerGate) ---@module ServerGate
+local GBRequests = require(script.Parent.GBRequests) ---@module GBRequests
+local Experiments = require(script.Parent.InternalExperiments) ---@module InternalExperiments
+local InternalConfigs = require(script.Parent.InternalConfigs) ---@module InternalConfigs
+local SignalConnection = require(script.Parent.Parent.Parent.Shared.Modules.Signal.SignalConnection) ---@module SignalConnection
+local LocalizationCache = require(script.Parent.LocalizationCache) ---@module LocalizationCache
+local LaunchDataResolver = require(script.Parent.LaunchDataResolver) ---@module LaunchDataResolver
+local ServerClientInfoHandler = require(script.Parent.ServerClientInfoHandler) ---@module ServerClientInfoHandler
 
 --= Types =--
 

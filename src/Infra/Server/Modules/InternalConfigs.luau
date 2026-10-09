@@ -19,10 +19,10 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local Utilities = shared.GBMod("Utilities")
-local GetRemote = shared.GBMod("GetRemote")
-local Signal = shared.GBMod("Signal")
-local SignalConnection = shared.GBMod("SignalConnection")
+local Utilities = require(script.Parent.Utilities)
+local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote)
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal)
+local SignalConnection = require(script.Parent.Parent.Parent.Shared.Modules.Signal.SignalConnection)
 
 --= Types =--
 

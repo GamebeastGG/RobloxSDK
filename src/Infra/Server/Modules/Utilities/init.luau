@@ -5,7 +5,7 @@ local marketplaceService = game:GetService("MarketplaceService")
 local httpService = game:GetService("HttpService")
 local runService = game:GetService("RunService")
 
-local DataCache = shared.GBMod("DataCache")
+local DataCache = require(script.Parent.Parent.Parent.Shared.Modules.DataCache)
 
 local utilities = {}
 
