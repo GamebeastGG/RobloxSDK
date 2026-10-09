@@ -94,5 +94,25 @@ return function()
             expect(result.a.c).to.equal(2)
             expect(result.a.b).never.to.be.ok()
         end)
+
+        -- The applied value used to be stored by reference, so the second operation wrote into
+        -- the cached changeset, and once the composed view was frozen the next apply errored
+        it("should not change a changeset when a later operation writes inside a value it set", function()
+            local shop = { price = 10 }
+            local cached = changeset({
+                { op = "set", path = { "shop" }, value = shop },
+                { op = "set", path = { "shop", "price" }, value = 5 },
+            })
+
+            local first = Changesets.apply({}, { cached })
+            expect(first.shop.price).to.equal(5)
+            expect(shop.price).to.equal(10)
+
+            -- ApplyConfigs freezes every composed view
+            table.freeze(first.shop)
+
+            local second = Changesets.apply({}, { cached })
+            expect(second.shop.price).to.equal(5)
+        end)
     end)
 end

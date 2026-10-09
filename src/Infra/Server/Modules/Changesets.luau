@@ -64,7 +64,10 @@ local function ApplyOperation(doc : { [string] : any }, operation : ChangesetOpe
 	local key = path[#path]
 
 	if operation.op == "set" or operation.op == "add" then
-		parent[key] = operation.value
+		-- Copied, matching the backend's copy-on-write merge. By reference, a later operation that
+		-- writes inside this value (set shop, then set shop.price) changed the cached changeset
+		-- itself, and once the composed view was frozen the next composition hit a read-only table.
+		parent[key] = if type(operation.value) == "table" then Utilities.recursiveCopy(operation.value) else operation.value
 	elseif operation.op == "delete" then
 		parent[key] = nil
 	else
