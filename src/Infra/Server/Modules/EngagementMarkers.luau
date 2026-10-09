@@ -153,7 +153,9 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 		end
 
 		if not success then
-			-- If request failed, add markers back to queue for retry
+			-- The SDK doesn't resend a failed batch itself: it hands the valid markers to the developer
+			-- through MarkersFailed (Markers:OnMarkersFailed) to retry with RetryFailedMarkersAsync.
+			-- Resending here as well would duplicate them, since the backend doesn't de-duplicate.
 			local toRetry = {}
 			local invalidMarkerCount = 0
 			for _, marker in data.markers do

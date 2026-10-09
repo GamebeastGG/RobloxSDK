@@ -60,6 +60,8 @@ local RequestProcessingCount = 0
 local KeyYeildWarning = false
 -- One time warning if requests are failing because of invalid/unset key
 local KeyWarningGiven = false
+-- One time warning that a custom environment doesn't reach the v1 routes
+local CustomEnvironmentWarned = false
 
 --= Internal Functions =--
 
@@ -137,6 +139,11 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 
 	if targetEnvironment and ENVIRONMENT_MAP[targetEnvironment] then
 		isStudioHeader = ENVIRONMENT_MAP[targetEnvironment]
+	elseif targetEnvironment and not CustomEnvironmentWarned and string.sub(requestRoute, 1, 3) == "v1/" then
+		-- v1 routes name their environment only through `isstudio`, which can't address a custom one
+		CustomEnvironmentWarned = true
+		local fallback = if isStudioHeader == "true" then "studio" else "production"
+		Utilities.GBWarn(`"{targetEnvironment}" is a custom environment. Configurations and experiments use it, but markers, server reports and cohorts can't yet and go to the {fallback} environment.`)
 	end
 
 	-- Define relevant headers. Backend enforces header presence unless specified.
