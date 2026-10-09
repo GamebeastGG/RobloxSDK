@@ -132,6 +132,11 @@ local playerAssignmentsResolvedSignal = Signal.new()
 ]]
 local serverAssignmentRetryPending = false
 
+--[[
+	Id of the latest server assignment request sent; only its response is applied.
+]]
+local lastServerRequestId = 0
+
 --= Public Variables =--
 
 -- Active/unenrolled assignment records for server-unit experiments, by experiment id
@@ -272,6 +277,12 @@ function executeUserAssignmentRequest()
 			return
 		end
 
+		-- A 200 without a usable body is treated as a failure: indexing it errored after these players
+		-- had already left the queue, so nothing retried them until the next refresh
+		if didSucceed and (type(response) ~= "table" or type(response.assignments) ~= "table") then
+			didSucceed = false
+		end
+
 		-- Requeue requested players if the assignment request failed
 		if not didSucceed then
 			Utilities.GBWarn("Failed to get experiment assignments:", response)
@@ -327,6 +338,11 @@ end
 	@canyield
 ]]
 local function executeServerAssignmentRequest()
+	-- The refresh loop, property changes and catalog updates each start one of these, so two can be
+	-- in flight; only the latest may apply, or a slow older response would undo a newer one
+	lastServerRequestId += 1
+	local requestId = lastServerRequestId
+
 	local serverContext = AssignmentContext:GetForServer(ExperimentCatalog:GetRequiredPropertyUnion("server"))
 	local serverId = Utilities.getServerId()
 
@@ -341,6 +357,16 @@ local function executeServerAssignmentRequest()
 			},
 		},
 	})
+
+	-- Superseded: the newer request applies (or retries) for itself
+	if requestId ~= lastServerRequestId then
+		return
+	end
+
+	-- A 200 without a usable body is treated as a failure rather than erroring below
+	if didSucceed and (type(response) ~= "table" or type(response.assignments) ~= "table") then
+		didSucceed = false
+	end
 
 	if not didSucceed then
 		Utilities.GBWarn("Failed to get server experiment assignment:", response)
