@@ -7,9 +7,8 @@ type SDKSettings = {
 	sdkDebugEnabled : boolean,
 	-- Custom URL for the SDK, if any.
 	customUrl : string | nil,
-	-- Environment the SDK is set to: "production", "studio", "development",
-	-- or the alias of a custom environment configured in the dashboard.
-	environment : string | nil,
+	-- Environment the SDK is set to. Defaults to "studio" in Studio and "production" in live servers.
+	environment : ("production" | "studio")?,
 	-- Seconds between engagement marker batch flushes to the backend.
 	markerFlushRate : number,
 	-- Seconds between status polls checking for configuration and experiment changes. Acts as a

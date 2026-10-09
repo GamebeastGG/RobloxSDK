@@ -106,7 +106,7 @@ return function()
 
         it("should refuse the settings only Setup can take", function()
             expect(function()
-                Gamebeast:UpdateSettings({ environment = "development" })
+                Gamebeast:UpdateSettings({ environment = "production" })
             end).to.throw()
 
             expect(function()

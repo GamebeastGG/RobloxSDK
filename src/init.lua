@@ -113,10 +113,10 @@ local DEFAULT_SETTINGS = {
 	environment = {
 		value = nil,
 		validator = function(val)
-			-- Built-in aliases are "production", "studio" and "development";
-			-- any other non-empty string targets a custom environment by its alias.
-			if val ~= nil and (type(val) ~= "string" or #val == 0) then
-				return false, `Expected an environment alias or nil, got {DescribeValue(val)}.`
+			-- Only the two built-in environments: markers, server reports and cohorts can't address
+			-- any other, so a custom one would split a game's data across two.
+			if val ~= nil and val ~= "production" and val ~= "studio" then
+				return false, `Expected "production", "studio" or nil, got {DescribeValue(val)}.`
 			end
 			return true
 		end
