@@ -128,8 +128,6 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 		return false, nil
 	end
 
-	RequestProcessingCount += 1
-
 	local requestBody
 	args = args or {}
 
@@ -150,6 +148,9 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 		["sdkversion"] = MetaData.version,
 		["universeid"] = tostring(game.GameId),
 		["serverid"] = Utilities.getServerId(),
+		-- The v2 spelling. The snapshot rate limit is keyed on it; without it, every server behind
+		-- one egress IP shares a single bucket, which a large game exhausts.
+		["server-id"] = Utilities.getServerId(),
 	}
 
 	-- Apply header overrides if provided
@@ -161,19 +162,31 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 
 	local url = GBDomain.. "/".. requestRoute
 
-	if requestMethod == "POST" or requestMethod == "PUT" then
-		requestBody = HttpService:JSONEncode(args)
-		headers["Content-Type"] = "application/json"
-	elseif requestMethod == "GET" then
-		-- Encode args to query string
-		local paramString = "?"
-		for key, val in args do
-			paramString ..= key.. "=".. HttpService:UrlEncode(val).. "&"
-		end
+	-- Encoded before the request counts as in flight. A value JSON can't represent (a sparse or
+	-- mixed table in marker data, say) throws here; counted first, it left BindToClose waiting out
+	-- the full 30s on a request that never went out, and killed the calling thread.
+	local didEncode, encodeError = pcall(function()
+		if requestMethod == "POST" or requestMethod == "PUT" then
+			requestBody = HttpService:JSONEncode(args)
+			headers["Content-Type"] = "application/json"
+		elseif requestMethod == "GET" then
+			-- Encode args to query string
+			local paramString = "?"
+			for key, val in args do
+				paramString ..= key.. "=".. HttpService:UrlEncode(val).. "&"
+			end
 
-		paramString = string.sub(paramString, 1, #paramString - 1)
-		url ..= paramString
+			paramString = string.sub(paramString, 1, #paramString - 1)
+			url ..= paramString
+		end
+	end)
+
+	if not didEncode then
+		Utilities.GBWarn(`Couldn't encode the request to {requestRoute}, so it was not sent:`, encodeError)
+		return false, nil
 	end
+
+	RequestProcessingCount += 1
 
 	-- Send request
 	local response, requestSuccess = Utilities.promiseReturn(maxRetries or 1, function()
