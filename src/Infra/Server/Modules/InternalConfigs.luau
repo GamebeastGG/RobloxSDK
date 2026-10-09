@@ -48,6 +48,7 @@ export type ConfigEntry = {
 
 local GetConfigRemoteFunc = GetRemote("Function", "Get")
 local ConfigChangedRemote = GetRemote("Event", "ConfigChanged")
+local ConfigIdentitiesChangedRemote = GetRemote("Event", "ConfigIdentitiesChanged")
 -- Neither signal copies its arguments per listener: a game can hold hundreds of config subscriptions,
 -- and each used to receive its own deep copy of the configuration on every fire. Listeners only read
 -- them, and the old configs a change carries are frozen before they are shared.
@@ -62,10 +63,48 @@ local ConfigsReady = false
 local ActiveConfigs = {} :: { [number] : ConfigEntry }
 -- Consumer path identifiers resolve alias first, then name, then id (as a string)
 local ConfigIdByIdentifier = {} :: { [string] : number }
+local IdentityBroadcastQueued = false
 
 --= Public Variables =--
 
 --= Internal Functions =--
+
+local function ResolveConfigId(identifier : string) : number?
+	return ConfigIdByIdentifier[tostring(identifier)]
+end
+
+local function GetIdentifierForEntry(entry : ConfigEntry) : string
+	return entry.alias or entry.name or tostring(entry.id)
+end
+
+-- The single identifier each config is keyed by for consumers, by stringified config id
+local function BuildIdentifierByConfigId() : { [string] : string }
+	local identifierByConfigId = {}
+	for configId, entry in ActiveConfigs do
+		identifierByConfigId[tostring(configId)] = GetIdentifierForEntry(entry)
+	end
+	return identifierByConfigId
+end
+
+--[[
+	Sends clients the current identifier maps. Clients otherwise only learned them on their first
+	fetch, so a renamed config, a new alias, a deleted config or a new empty one never reached a
+	player already in game: Get on the new name returned nil while the server resolved it.
+	Deferred so a status poll that touches several configs sends one update.
+]]
+local function QueueIdentityBroadcast()
+	if IdentityBroadcastQueued then
+		return
+	end
+	IdentityBroadcastQueued = true
+
+	task.defer(function()
+		IdentityBroadcastQueued = false
+		if ConfigsReady then
+			ConfigIdentitiesChangedRemote:FireAllClients(ConfigIdByIdentifier, BuildIdentifierByConfigId())
+		end
+	end)
+end
 
 local function RebuildIdentifierMap()
 	table.clear(ConfigIdByIdentifier)
@@ -84,14 +123,8 @@ local function RebuildIdentifierMap()
 			ConfigIdByIdentifier[entry.alias] = configId
 		end
 	end
-end
 
-local function ResolveConfigId(identifier : string) : number?
-	return ConfigIdByIdentifier[tostring(identifier)]
-end
-
-local function GetIdentifierForEntry(entry : ConfigEntry) : string
-	return entry.alias or entry.name or tostring(entry.id)
+	QueueIdentityBroadcast()
 end
 
 local function IsPathPrivate(path : {string}, privatePaths: {{string}}) : boolean
@@ -646,19 +679,17 @@ function InternalConfigs:Init()
 		self:WaitForConfigsReady()
 
 		local configs = {}
-		-- The single identifier each config is keyed by for consumers. ConfigIdByIdentifier holds
-		-- every spelling (id, name and alias all resolve), so a client keying its own payload off it
-		-- listed the same document up to three times where the server listed it once.
-		local identifierByConfigId = {}
 		for configId, entry in ActiveConfigs do
 			local view = entry.viewByPlayer[player] or entry.serverView
 			configs[tostring(configId)] = FilterConfigForClient({}, view, entry.privacy)
-			identifierByConfigId[tostring(configId)] = GetIdentifierForEntry(entry)
 		end
 
+		-- identifierByConfigId keys each config once for consumers. ConfigIdByIdentifier holds every
+		-- spelling (id, name and alias all resolve), so a client keying its own payload off it listed
+		-- the same document up to three times where the server listed it once.
 		return {
 			idByIdentifier = ConfigIdByIdentifier,
-			identifierByConfigId = identifierByConfigId,
+			identifierByConfigId = BuildIdentifierByConfigId(),
 			configs = configs,
 		}
 	end

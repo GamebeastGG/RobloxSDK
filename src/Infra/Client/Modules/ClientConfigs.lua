@@ -29,6 +29,7 @@ local SignalConnection = require(script.Parent.Parent.Parent.Shared.Modules.Sign
 
 local GetConfigRemoteFunc = GetRemote("Function", "Get")
 local ConfigChangedRemote = GetRemote("Event", "ConfigChanged")
+local ConfigIdentitiesChangedRemote = GetRemote("Event", "ConfigIdentitiesChanged")
 -- Neither signal copies its arguments per listener: every Configs:Observe adds a listener, and with
 -- ~1,600 of them each fire used to make ~1,600 deep copies of the configuration. Listeners only read
 -- the arguments, and the old config a change carries is frozen before it is shared.
@@ -189,6 +190,33 @@ end
 
 --= Initializers =--
 function ClientConfigs:Init()
+    -- The server sends its identifier maps whenever a config is renamed, given an alias, created or
+    -- deleted. Before, they only arrived with the first payload, so Get on a renamed config's new
+    -- name returned nil here while the server resolved it. (The initial payload carries them too,
+    -- so updates before it arrives are ignored.)
+    ConfigIdentitiesChangedRemote.OnClientEvent:Connect(function(idByIdentifier, identifierByConfigId)
+        if not ConfigsReady or type(idByIdentifier) ~= "table" or type(identifierByConfigId) ~= "table" then
+            return
+        end
+
+        IdByIdentifier = idByIdentifier
+        IdentifierByConfigId = identifierByConfigId
+
+        -- A deleted config's values were already cleared by its last change; now its entry goes too
+        for configKey in CachedConfigs do
+            if identifierByConfigId[configKey] == nil then
+                CachedConfigs[configKey] = nil
+            end
+        end
+
+        -- A new config starts empty; its values arrive as changes
+        for configKey in identifierByConfigId do
+            if CachedConfigs[configKey] == nil then
+                CachedConfigs[configKey] = {}
+            end
+        end
+    end)
+
     ConfigChangedRemote.OnClientEvent:Connect(function(configId : number, changes : { { path : {string}, newValue : any}})
         if not ConfigsReady then return end
 
