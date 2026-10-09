@@ -50,9 +50,13 @@ export type Context = {
 local CONTEXT_SCHEMA_VERSION = 1
 
 --[[
-	Backend limit on the number of items in a list-valued property.
+	Backend limits on developer-defined properties (sdk-contract core/limits.ts). A request breaking
+	any of them is rejected whole, and a user request carries up to 250 players, so they are enforced
+	here, when a property is set, rather than discovered as a failing request for the whole server.
 ]]
 local MAX_LIST_PROPERTY_ITEMS = 100
+local MAX_PROPERTY_NAME_LENGTH = 128
+local MAX_PROPERTIES = 100
 
 --[[
 	How long to wait for context callbacks to finish, before skipping them
@@ -181,7 +185,7 @@ end
 
 --[[
 	Checks that a property value matches what the backend accepts: a string,
-	finite number, boolean, or a list of those with at most
+	finite number, boolean, or a list of one of those types with at most
 	`MAX_LIST_PROPERTY_ITEMS` items. Returns a reason when invalid.
 ]]
 local function validatePropertyValue(value: any): (boolean, string?)
@@ -194,6 +198,7 @@ local function validatePropertyValue(value: any): (boolean, string?)
 	end
 
 	local itemCount = 0
+	local listType: string? = nil
 	for key, item in value do
 		itemCount += 1
 		if key ~= itemCount then
@@ -201,6 +206,12 @@ local function validatePropertyValue(value: any): (boolean, string?)
 		end
 		if not isScalar(item) then
 			return false, `list item {itemCount} has unsupported type "{typeof(item)}"`
+		end
+
+		-- The backend rejects mixed lists outright: containsAny over them has no stable meaning
+		listType = listType or type(item)
+		if type(item) ~= listType then
+			return false, `lists must hold one type of value, but item {itemCount} is a {type(item)} in a list of {listType}s`
 		end
 	end
 
@@ -221,6 +232,11 @@ local function setProperty(store: PropertyMap, key: any, value: any, subjectLabe
 		return false
 	end
 
+	if #key > MAX_PROPERTY_NAME_LENGTH then
+		Utilities.GBWarn(`Ignoring experiment property "{string.sub(key, 1, 32)}..." ({subjectLabel}): names may be at most {MAX_PROPERTY_NAME_LENGTH} characters.`)
+		return false
+	end
+
 	if value == nil then
 		if store[key] == nil then
 			return false
@@ -237,6 +253,18 @@ local function setProperty(store: PropertyMap, key: any, value: any, subjectLabe
 
 	if Utilities.primativeDeepEqual(store[key], value) then
 		return false
+	end
+
+	-- Only adding a property can break the limit; replacing one can't
+	if store[key] == nil then
+		local propertyCount = 0
+		for _ in store do
+			propertyCount += 1
+		end
+		if propertyCount >= MAX_PROPERTIES then
+			Utilities.GBWarn(`Ignoring experiment property "{key}" ({subjectLabel}): at most {MAX_PROPERTIES} properties can be set.`)
+			return false
+		end
 	end
 
 	-- Copy lists so later mutation by the caller cannot desync the store

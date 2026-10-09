@@ -38,6 +38,19 @@ local ClientInfoChangedSignal = Signal.new()
 
 --= Constants =--
 
+-- Longest string a client may report for any client info value
+local MAX_CLIENT_STRING_LENGTH = 64
+
+-- The values the backend's targeting knows for each client-reported field
+local CLIENT_INFO_VOCABULARIES = {
+    inputType = { keyboard = true, gamepad = true, touch = true, unknown = true },
+    device = { mobile = true, console = true, pc = true, vr = true, unknown = true },
+    deviceSubType = { tablet = true, phone = true, xbox = true, playstation = true, unknown = true },
+}
+
+-- HttpService:GenerateGUID(false), e.g. 8f0e2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b
+local SESSION_ID_PATTERN = "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
+
 local DefaultInfo = Schema.new({
     inputType = {
         default = "unknown",
@@ -82,7 +95,46 @@ local ClientInfoCache = ServerGate:GetCache()
 
 --= Internal Functions =--
 
+--[[
+    Whether a value reported by a client may be stored. The client is untrusted, and these values
+    reach a lot: device and input type go into the experiment assignment request, which covers every
+    player in the server, so one bad value used to have the whole request rejected; all of them are
+    stamped on the player's markers; and the numbers feed session arithmetic on the way out.
+]]
+local function IsValidClientInfo(key : string, value : any) : boolean
+    if not DefaultInfo:MatchesType(key, value) then
+        return false
+    end
+
+    if type(value) == "number" then
+        -- NaN and infinities can't be encoded as JSON, and break the session arithmetic
+        return value == value and value ~= math.huge and value ~= -math.huge
+    end
+
+    if type(value) == "string" then
+        if #value > MAX_CLIENT_STRING_LENGTH then
+            return false
+        end
+
+        local vocabulary = CLIENT_INFO_VOCABULARIES[key]
+        if vocabulary then
+            return vocabulary[value] == true
+        end
+
+        if key == "sessionId" then
+            -- The SDK generates these with GenerateGUID; anything else did not come from it
+            return string.match(value, SESSION_ID_PATTERN) ~= nil
+        end
+    end
+
+    return true
+end
+
 local function UpdateClientInfoCache(player : Player, updatedInfo : { [string] : any })
+    if type(updatedInfo) ~= "table" then
+        return
+    end
+
     local isNew = false
     if not ClientInfoCache[player] then
         ClientInfoCache[player] = DefaultInfo:GetDefault()
@@ -90,7 +142,12 @@ local function UpdateClientInfoCache(player : Player, updatedInfo : { [string] :
     end
 
     for updatedKey, updatedValue in pairs(updatedInfo) do
-        if not DefaultInfo:HasKey(updatedKey) then
+        if type(updatedKey) ~= "string" or not DefaultInfo:HasKey(updatedKey) then
+            continue
+        end
+
+        -- Dropped rather than stored; the previous (or default) value stands
+        if not IsValidClientInfo(updatedKey, updatedValue) then
             continue
         end
 
@@ -109,6 +166,11 @@ local function UpdateClientInfoCache(player : Player, updatedInfo : { [string] :
 end
 
 --= API Functions =--
+
+-- Whether a client-reported value would be accepted for `key`; values that aren't are dropped.
+function ServerClientInfoHandler:IsValidClientInfo(key : string, value : any) : boolean
+    return DefaultInfo:HasKey(key) and IsValidClientInfo(key, value)
+end
 
 function ServerClientInfoHandler:GetClientInfo(player : Player | number, key : string) : any
     if typeof(player) == "number" then

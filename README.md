@@ -42,7 +42,7 @@ Experiments:SetPlayerProperty(player, "level", 13)
 Experiments:SetServerProperties({ region = "eu", mode = "ranked" })
 ```
 
-Values must be strings, numbers, booleans, or lists of those (up to 100 items). Set player properties as soon as their data loads: assignment is requested shortly after join, and changing a property afterwards re-resolves that player's assignments.
+Values must be strings, numbers, booleans, or lists of one of those types (up to 100 items). A player or the server can have up to 100 properties, with names up to 128 characters; the SDK warns and ignores anything outside these limits, which Gamebeast would otherwise reject for the whole server. Set player properties as soon as their data loads: assignment is requested shortly after join, and changing a property afterwards re-resolves that player's assignments.
 
 Relevant `sdkSettings`:
 - `markerFlushRate` — seconds between engagement marker batch flushes (default 10, minimum 1).

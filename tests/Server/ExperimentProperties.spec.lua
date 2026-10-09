@@ -74,6 +74,28 @@ return function()
             expect(AssignmentContext:SetServerProperties({ list = atLimit })).to.equal(true)
         end)
 
+        -- Each of these is rejected by the backend for the whole request (up to 250 players)
+        it("should reject lists that mix value types", function()
+            expect(AssignmentContext:SetServerProperties({ mixed = { 1, "a" } })).to.equal(false)
+            expect(AssignmentContext:SetServerProperties({ flags = { true, 1 } })).to.equal(false)
+            expect(AssignmentContext:SetServerProperties({ tags = { "a", "b" } })).to.equal(true)
+        end)
+
+        it("should reject property names longer than 128 characters", function()
+            expect(AssignmentContext:SetServerProperty(string.rep("k", 129), 1)).to.equal(false)
+            expect(AssignmentContext:SetServerProperty(string.rep("k", 128), 1)).to.equal(true)
+        end)
+
+        it("should refuse a property past the 100th, but still replace existing ones", function()
+            for index = 1, 100 do
+                AssignmentContext:SetServerProperty("p" .. index, index)
+            end
+
+            expect(AssignmentContext:SetServerProperty("p101", 101)).to.equal(false)
+            expect(AssignmentContext:GetServerProperties().p101).never.to.be.ok()
+            expect(AssignmentContext:SetServerProperty("p1", 0)).to.equal(true)
+        end)
+
         it("should copy lists so caller mutation does not leak into the store", function()
             local tags = { "a" }
             AssignmentContext:SetServerProperties({ tags = tags })
