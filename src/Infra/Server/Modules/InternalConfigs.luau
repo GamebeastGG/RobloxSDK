@@ -48,8 +48,11 @@ export type ConfigEntry = {
 
 local GetConfigRemoteFunc = GetRemote("Function", "Get")
 local ConfigChangedRemote = GetRemote("Event", "ConfigChanged")
-local ConfigReadySignal = Signal.new()
-local BatchConfigUpdatedSignal = Signal.new()
+-- Neither signal copies its arguments per listener: a game can hold hundreds of config subscriptions,
+-- and each used to receive its own deep copy of the configuration on every fire. Listeners only read
+-- them, and the old configs a change carries are frozen before they are shared.
+local ConfigReadySignal = Signal.new({ copyArguments = false })
+local BatchConfigUpdatedSignal = Signal.new({ copyArguments = false })
 
 --= Constants =--
 
@@ -227,7 +230,10 @@ end
 
 function InternalConfigs:OnReady(callback : (newConfigs : any) -> ()) : RBXScriptConnection
 	if not ConfigsReady then
-		return ConfigReadySignal:Once(callback)
+		-- Each callback gets its own table of views, as it does once the configs are ready
+		return ConfigReadySignal:Once(function()
+			callback(self:GetAll(nil))
+		end)
 	else
 		task.spawn(callback, self:GetAll(nil))
 		return SignalConnection.new()
@@ -250,7 +256,7 @@ function InternalConfigs:SetReady()
 	end
 
 	ConfigsReady = true
-	ConfigReadySignal:Fire(self:GetAll(nil))
+	ConfigReadySignal:Fire()
 end
 
 function InternalConfigs:WaitForConfigsReady() : true
@@ -492,6 +498,8 @@ function InternalConfigs:ApplyConfigs(player: Player?, configId : number, newVie
 		local changedBatch = InternalConfigs:_checkConfigChanged(oldConfigs, newView)
 
 		if #changedBatch > 0 then
+			-- Shared by every listener rather than copied for each, so nothing may change it
+			recursiveFreeze(oldConfigs)
 			BatchConfigUpdatedSignal:Fire(player, configId, changedBatch, oldConfigs)
 		end
 
@@ -556,6 +564,11 @@ function InternalConfigs:ApplyConfigs(player: Player?, configId : number, newVie
 					change.newValue = FilterConfigForClient(change.path, change.newValue, privacyConfig)
 					table.insert(filteredChanges, change)
 				end
+			end
+
+			-- A change that only touched private keys leaves nothing for clients to apply
+			if #filteredChanges == 0 then
+				return
 			end
 
 			if player then

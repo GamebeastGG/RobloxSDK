@@ -29,8 +29,11 @@ local SignalConnection = shared.GBMod("SignalConnection")
 
 local GetConfigRemoteFunc = GetRemote("Function", "Get")
 local ConfigChangedRemote = GetRemote("Event", "ConfigChanged")
-local ConfigUpdatedSignal = Signal.new()
-local ConfigReadySignal = Signal.new()
+-- Neither signal copies its arguments per listener: every Configs:Observe adds a listener, and with
+-- ~1,600 of them each fire used to make ~1,600 deep copies of the configuration. Listeners only read
+-- the arguments, and the old config a change carries is frozen before it is shared.
+local ConfigUpdatedSignal = Signal.new({ copyArguments = false })
+local ConfigReadySignal = Signal.new({ copyArguments = false })
 
 --= Constants =--
 
@@ -60,6 +63,17 @@ local function DeepCopy(object)
         end
     end
     return newObject
+end
+
+local function DeepFreeze(object)
+    if not table.isfrozen(object) then
+        table.freeze(object)
+    end
+    for _, value in object do
+        if type(value) == "table" then
+            DeepFreeze(value)
+        end
+    end
 end
 
 local function ResolveConfigId(identifier : string) : number?
@@ -224,6 +238,9 @@ function ClientConfigs:Init()
             end
         end
 
+        -- Shared by every listener rather than copied for each, so nothing may change it. The change
+        -- list is not frozen: its values were just written into the live cache above.
+        DeepFreeze(oldConfig)
         ConfigUpdatedSignal:Fire(configId, changes, oldConfig)
     end)
 
@@ -234,7 +251,7 @@ function ClientConfigs:Init()
         IdByIdentifier = payload.idByIdentifier
         IdentifierByConfigId = payload.identifierByConfigId
         ConfigsReady = true
-        ConfigReadySignal:Fire(GetAllViews())
+        ConfigReadySignal:Fire()
     end)
 end
 
