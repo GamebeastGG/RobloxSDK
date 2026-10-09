@@ -1,12 +1,14 @@
 --[[
     The Gamebeast SDK is Copyright © 2023 Gamebeast, Inc. to present.
     All rights reserved.
-    
+
     ClientConfigs.lua
-    
+
     Description:
         Internal module for managing client-side configuration data.
-    
+        Mirrors the server's multi-config store; consumer paths begin with the
+        configuration's alias or name.
+
 --]]
 
 --= Root =--
@@ -17,26 +19,36 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 --= Dependencies =--
 
-local GetRemote = shared.GBMod("GetRemote")
-local Signal = shared.GBMod("Signal")
-local SignalConnection = shared.GBMod("SignalConnection")
+local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote)
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal)
+local SignalConnection = require(script.Parent.Parent.Parent.Shared.Modules.Signal.SignalConnection)
 
 --= Types =--
 
 --= Object References =--
 
 local GetConfigRemoteFunc = GetRemote("Function", "Get")
---local GetEventDataRemoteFunc = GetRemote("Function", "GetEventData")
 local ConfigChangedRemote = GetRemote("Event", "ConfigChanged")
-local ConfigUpdatedSignal = Signal.new()
-local ConfigReadySignal = Signal.new()
+local ConfigIdentitiesChangedRemote = GetRemote("Event", "ConfigIdentitiesChanged")
+-- Neither signal copies its arguments per listener: every Configs:Observe adds a listener, and with
+-- ~1,600 of them each fire used to make ~1,600 deep copies of the configuration. Listeners only read
+-- the arguments, and the old config a change carries is frozen before it is shared.
+local ConfigUpdatedSignal = Signal.new({ copyArguments = false })
+local ConfigReadySignal = Signal.new({ copyArguments = false })
 
 --= Constants =--
 
 --= Variables =--
 
+-- Config documents keyed by stringified config id
 local CachedConfigs = {}
+-- Consumer path identifiers (alias, name, or id) mapped to config ids
+local IdByIdentifier = {}
+-- The one identifier each config is listed under, mirroring the server's own keying
+local IdentifierByConfigId = {}
 local ConfigsReady = false
+-- Guards the re-pull below, so two events for unknown configs cannot race each other
+local IsRepullingConfigs = false
 
 --= Public Variables =--
 
@@ -52,6 +64,33 @@ local function DeepCopy(object)
         end
     end
     return newObject
+end
+
+local function DeepFreeze(object)
+    if not table.isfrozen(object) then
+        table.freeze(object)
+    end
+    for _, value in object do
+        if type(value) == "table" then
+            DeepFreeze(value)
+        end
+    end
+end
+
+local function ResolveConfigId(identifier : string) : number?
+    return IdByIdentifier[tostring(identifier)]
+end
+
+-- Returns every cached config document keyed by consumer identifier.
+-- Keyed off IdentifierByConfigId rather than IdByIdentifier: the latter resolves every spelling
+-- of a config (id, name and alias), which listed the same document up to three times here while
+-- the server's equivalent listed it once.
+local function GetAllViews()
+    local views = {}
+    for configId, identifier in IdentifierByConfigId do
+        views[identifier] = CachedConfigs[tostring(configId)]
+    end
+    return views
 end
 
 --= API Functions =--
@@ -73,14 +112,31 @@ function ClientConfigs:Get(path : string | { string }, _configs : any?)
     if typeof(path) == "string" then
         path = {path}
     end
-	
-    local target = _configs or CachedConfigs
-	for _, key in path do
-        target = target[key]
 
+    if #path == 0 then
+        error("Config path must begin with a configuration name or alias.")
+        return nil
+    end
+
+    -- Overrides are config-local documents (e.g. old configs in OnChanged), so the
+    -- identifier segment is skipped rather than resolved.
+    local target
+    if _configs then
+        target = _configs
+    else
+        local configId = ResolveConfigId(path[1])
+        if not configId then
+            return nil
+        end
+
+        target = CachedConfigs[tostring(configId)]
+    end
+
+	for index = 2, #path do
         if target == nil then
             return nil
         end
+        target = target[path[index]]
     end
 
 	return target
@@ -91,13 +147,19 @@ function ClientConfigs:OnChanged(targetConfig : string | {string}, callback : (n
         targetConfig = {targetConfig}
     end
 
-    return ConfigUpdatedSignal:Connect(function(changes : { { path : {string}, newValue : any, oldValue : any}}, oldConfigs : any)
+    return ConfigUpdatedSignal:Connect(function(configId : number, changes : { { path : {string}, newValue : any, oldValue : any}}, oldConfigs : any)
+        -- Resolve the target identifier at fire time so subscriptions can precede config load
+        if ResolveConfigId(targetConfig[1]) ~= configId then
+            return
+        end
+
         for _, change in changes do
             local match = true
-            for index, pathSegment in targetConfig do
-                if change.path[index] == nil then
+            for index = 2, #targetConfig do
+                local changeSegment = change.path[index - 1]
+                if changeSegment == nil then
                     break
-                elseif change.path[index] ~= pathSegment then
+                elseif changeSegment ~= targetConfig[index] then
                     match = false
                     break
                 end
@@ -113,28 +175,88 @@ end
 
 function ClientConfigs:OnReady(callback : (configs : any) -> ()) : RBXScriptConnection
     if ConfigsReady then
-        task.spawn(callback, CachedConfigs)
+        task.spawn(callback, GetAllViews())
         return SignalConnection.new()
     end
 
     return ConfigReadySignal:Once(function()
-        callback(CachedConfigs)
+        callback(GetAllViews())
     end)
 end
-    
+
 function ClientConfigs:IsReady() : boolean
     return ConfigsReady
 end
 
 --= Initializers =--
 function ClientConfigs:Init()
-    ConfigChangedRemote.OnClientEvent:Connect(function(changes : { { path : {string}, newValue : any}})
+    -- The server sends its identifier maps whenever a config is renamed, given an alias, created or
+    -- deleted. Before, they only arrived with the first payload, so Get on a renamed config's new
+    -- name returned nil here while the server resolved it. (The initial payload carries them too,
+    -- so updates before it arrives are ignored.)
+    ConfigIdentitiesChangedRemote.OnClientEvent:Connect(function(idByIdentifier, identifierByConfigId)
+        if not ConfigsReady or type(idByIdentifier) ~= "table" or type(identifierByConfigId) ~= "table" then
+            return
+        end
+
+        IdByIdentifier = idByIdentifier
+        IdentifierByConfigId = identifierByConfigId
+
+        -- A deleted config's values were already cleared by its last change; now its entry goes too
+        for configKey in CachedConfigs do
+            if identifierByConfigId[configKey] == nil then
+                CachedConfigs[configKey] = nil
+            end
+        end
+
+        -- A new config starts empty; its values arrive as changes
+        for configKey in identifierByConfigId do
+            if CachedConfigs[configKey] == nil then
+                CachedConfigs[configKey] = {}
+            end
+        end
+    end)
+
+    ConfigChangedRemote.OnClientEvent:Connect(function(configId : number, changes : { { path : {string}, newValue : any}})
         if not ConfigsReady then return end
 
-        local oldConfigs = DeepCopy(CachedConfigs)
+        local configKey = tostring(configId)
+        local config = CachedConfigs[configKey]
+
+        -- Unknown config (e.g. created after join): re-pull the full payload instead of patching
+        if config == nil then
+            if IsRepullingConfigs then
+                return
+            end
+            IsRepullingConfigs = true
+
+            task.spawn(function()
+                local didSucceed, payload = pcall(function()
+                    return GetConfigRemoteFunc:InvokeServer()
+                end)
+
+                IsRepullingConfigs = false
+
+                if not didSucceed or not payload then
+                    return
+                end
+
+                CachedConfigs = payload.configs
+                IdByIdentifier = payload.idByIdentifier
+                IdentifierByConfigId = payload.identifierByConfigId
+
+                -- OnChanged and Observe resolve their identifier when fired, so they support
+                -- subscribing to a config that does not exist yet. Without this they never heard
+                -- about the config they were waiting for.
+                ConfigUpdatedSignal:Fire(configId, changes, nil)
+            end)
+            return
+        end
+
+        local oldConfig = DeepCopy(config)
 
         for _, change in changes do
-            local target = CachedConfigs
+            local target = config
             for index, pathSegment in change.path do
                 if index == #change.path then
                     target[pathSegment] = change.newValue
@@ -144,14 +266,20 @@ function ClientConfigs:Init()
             end
         end
 
-        ConfigUpdatedSignal:Fire(changes, oldConfigs)
+        -- Shared by every listener rather than copied for each, so nothing may change it. The change
+        -- list is not frozen: its values were just written into the live cache above.
+        DeepFreeze(oldConfig)
+        ConfigUpdatedSignal:Fire(configId, changes, oldConfig)
     end)
 
     task.spawn(function()
-        CachedConfigs = GetConfigRemoteFunc:InvokeServer()
+        local payload = GetConfigRemoteFunc:InvokeServer()
         --TODO: Make sure we actually got something
+        CachedConfigs = payload.configs
+        IdByIdentifier = payload.idByIdentifier
+        IdentifierByConfigId = payload.identifierByConfigId
         ConfigsReady = true
-        ConfigReadySignal:Fire(CachedConfigs)
+        ConfigReadySignal:Fire()
     end)
 end
 

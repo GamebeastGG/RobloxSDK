@@ -17,10 +17,11 @@ local ServerStateReporter = {}
 local Players = game:GetService("Players")
 
 --= Dependencies =--
-local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
-local MetricCollector = shared.GBMod("MetricCollector") ---@module MetricCollector
-local GetRemote = shared.GBMod("GetRemote") ---@module GetRemote
-local Utilities = shared.GBMod("Utilities") ---@module Utilities
+local GBRequests = require(script.Parent.GBRequests) ---@module GBRequests
+local MetricCollector = require(script.Parent.Parent.Parent.Shared.Modules.MetricCollector) ---@module MetricCollector
+local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote) ---@module GetRemote
+local Utilities = require(script.Parent.Utilities) ---@module Utilities
+local DataCache = require(script.Parent.Parent.Parent.Shared.Modules.DataCache)
 
 --= Types =--
 type ClientMetricReport = {
@@ -34,9 +35,18 @@ local ExportMetricsRemote = GetRemote("Event", "ExportClientMetrics")
 
 --= Constants =--
 local PROBE_FREQUENCY = 1 -- seconds
-local REPORT_FREQUENCY = 10 -- seconds
+-- Most client metric reports kept from one player per server report. A client reports every 10s, so
+-- even the longest serverReportRate (45s) sees about 5; without a cap, a client firing reports in a
+-- loop grew the metric history without bound until the next server report, which then sorted it all.
+local MAX_CLIENT_METRIC_REPORTS_PER_SERVER_REPORT = 10
+-- How often the report loop re-derives its wait, so a lowered serverReportRate is picked up
+-- without sitting out a whole long interval first
+local REPORT_RECHECK_INTERVAL = 5 -- seconds
 
 --= Variables =--
+
+-- Client metric reports accepted from each player since the last server report
+local ClientMetricReportsByPlayer : { [Player] : number } = {}
 
 --= Interval Functions =--
 -- turns an array of metric history into predefined aggregations
@@ -92,6 +102,8 @@ function ServerStateReporter:PrepareServerStateReport()
 
     -- read metrics from collector
     local metricHistory = MetricCollector:ReadAndResetAllMetrics()
+    -- Each report starts a new window for the per-player cap on client metric reports
+    table.clear(ClientMetricReportsByPlayer)
     
     -- construct the server state report
     local serverStateReport = {
@@ -125,14 +137,33 @@ function ServerStateReporter:Init()
         end
     end)
 
-    -- report the server state on a timer
+    -- report the server state every serverReportRate seconds
     task.spawn(function()
-        while task.wait(REPORT_FREQUENCY) do
+        local lastReportTime = tick()
+
+        while true do
+            local remaining = DataCache:Get("Settings").serverReportRate - (tick() - lastReportTime)
+            if remaining > 0 then
+                task.wait(math.min(remaining, REPORT_RECHECK_INTERVAL))
+                continue
+            end
+
+            lastReportTime = tick()
             self:SendServerStateReport()
         end
     end)
 
     ExportMetricsRemote.OnServerEvent:Connect(function(player : Player, metrics : ClientMetricReport)
+        if type(metrics) ~= "table" or type(metrics.PhysicsFps) ~= "table" or type(metrics.Ping) ~= "table" then
+            return
+        end
+
+        local reportCount = (ClientMetricReportsByPlayer[player] or 0) + 1
+        if reportCount > MAX_CLIENT_METRIC_REPORTS_PER_SERVER_REPORT then
+            return
+        end
+        ClientMetricReportsByPlayer[player] = reportCount
+
         -- only use the first 10 values
         -- this is because the client will report the history every 10 seconds,
         -- and probes every 1 second, so in theory it's always going to be 10 values

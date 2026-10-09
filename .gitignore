@@ -1,4 +1,7 @@
 # Roblox Studio lock files
 /*.rbxlx.lock
 /*.rbxl.lock
-/tests/testez/*
+/tests/DevPackages/
+
+sourcemap.json
+.forest/

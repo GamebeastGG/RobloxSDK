@@ -22,9 +22,9 @@ local LocalizationService = game:GetService("LocalizationService")
 
 --= Dependencies =--
 
-local Utilities = shared.GBMod("Utilities")
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
-local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
+local Utilities = require(script.Parent.Parent.Utilities)
+local ServerGate = require(script.Parent.Parent.ServerGate) ---@module ServerGate
+local EngagementMarkers = require(script.Parent.Parent.EngagementMarkers) ---@module Markers
 
 --= Types =--
 

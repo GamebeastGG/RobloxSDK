@@ -24,13 +24,13 @@ local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
-local Utilities = shared.GBMod("Utilities")
-local LaunchDataResolver = shared.GBMod("LaunchDataResolver") ---@module LaunchDataResolver
-local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
-local PlayerStats = shared.GBMod("PlayerStats") ---@module PlayerStats
-local SocialHandler = shared.GBMod("SocialHandler") ---@module SocialHandler
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
-local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
+local Utilities = require(script.Parent.Parent.Utilities)
+local LaunchDataResolver = require(script.Parent.Parent.LaunchDataResolver) ---@module LaunchDataResolver
+local EngagementMarkers = require(script.Parent.Parent.EngagementMarkers) ---@module Markers
+local PlayerStats = require(script.Parent.Parent.PlayerStats) ---@module PlayerStats
+local SocialHandler = require(script.Parent.SocialHandler) ---@module SocialHandler
+local ServerGate = require(script.Parent.Parent.ServerGate) ---@module ServerGate
+local ServerClientInfoHandler = require(script.Parent.Parent.ServerClientInfoHandler) ---@module ServerClientInfoHandler
 
 --= Types =--
 

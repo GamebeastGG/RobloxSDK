@@ -1,0 +1,11 @@
+{
+  "dependencies": {},
+  "mounts": {
+    "tests/DevPackages": {
+      "dependencies": {
+        "roblox/testez": "^0.4.1"
+      }
+    }
+  },
+  "platform": "roblox"
+}

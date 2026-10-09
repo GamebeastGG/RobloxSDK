@@ -16,7 +16,7 @@ local Configs = { }
 
 --= Dependencies =--
 
-local ClientConfigs = shared.GBMod("ClientConfigs") ---@module ClientConfigs
+local ClientConfigs = require(script.Parent.Parent.Modules.ClientConfigs) ---@module ClientConfigs
 
 --= Types =--
 
