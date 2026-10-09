@@ -68,9 +68,14 @@ local MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME = 10
 local BACKUP_SAVE_DEBOUNCE = 30
 
 --[[
-	How long to wait between attempts to reach the backend when bootstrap fails.
+	How long to wait between attempts to reach the backend when bootstrap fails. The wait starts at
+	CONNECTION_RETRY_DELAY and doubles up to MAX_CONNECTION_RETRY_DELAY, spread by up to
+	CONNECTION_RETRY_JITTER: retrying every 10s forever had every server in fallback hit the heaviest
+	endpoint in lockstep as an outage ended, and a revoked key retried every 10s for a server's life.
 ]]
 local CONNECTION_RETRY_DELAY = 10
+local MAX_CONNECTION_RETRY_DELAY = 300
+local CONNECTION_RETRY_JITTER = 0.25
 
 --[[
 	Version stamp for the backup blob format. Old-format backups are rejected.
@@ -127,11 +132,52 @@ local function GetBackupKey() : string
 	return "Configs_".. environment
 end
 
+-- Parses "v1.10.0" (or "1.10.0") into { 1, 10, 0 }; nil for anything else
+local function ParseVersion(version : any) : { number }?
+	if type(version) ~= "string" then
+		return nil
+	end
+
+	local major, minor, patch = string.match(version, "^v?(%d+)%.(%d+)%.(%d+)")
+	if not major then
+		return nil
+	end
+
+	return { tonumber(major) :: number, tonumber(minor) :: number, tonumber(patch) :: number }
+end
+
 local function IsFiniteNumber(value : any) : boolean
 	return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
 end
 
 --= API Functions =--
+
+-- How long to wait before reconnection attempt `attempt` (1 for the first retry)
+function Updater:GetConnectionRetryDelay(attempt : number, statusCode : number?, jitterRoll : number?) : number
+	-- A rejected key won't start working by itself, so check back rarely; GBRequests has already
+	-- warned about the key
+	local delay = if statusCode == 401 or statusCode == 403
+		then MAX_CONNECTION_RETRY_DELAY
+		else math.min(CONNECTION_RETRY_DELAY * 2 ^ (attempt - 1), MAX_CONNECTION_RETRY_DELAY)
+
+	return delay * (1 + (jitterRoll or math.random()) * CONNECTION_RETRY_JITTER)
+end
+
+-- Whether `current` is older than `latest`. Compared part by part as numbers: compared as strings,
+-- "v1.9.0" sorted after "v1.10.0" and the out-of-date warning was missed. False if either can't be parsed.
+function Updater:IsVersionOutdated(current : string, latest : string) : boolean
+	local currentParts, latestParts = ParseVersion(current), ParseVersion(latest)
+	if not currentParts or not latestParts then
+		return false
+	end
+
+	for index = 1, 3 do
+		if currentParts[index] ~= latestParts[index] then
+			return currentParts[index] < latestParts[index]
+		end
+	end
+	return false
+end
 
 --[[
 	Stores the polling object from a bootstrap or status response, dropping anything malformed.
@@ -441,55 +487,58 @@ function Updater:Init()
 	-- Check version
 	task.spawn(function()
 		local success, versionData = GBRequests:GBRequestAsync("v1/latest/version?platform=roblox")
-		if success and versionData.version then
-			if MetaData.version < versionData.version then
-				Utilities.GBWarn(`Gamebeast SDK is out of date! Please update to the latest version. {MetaData.version} -> {versionData.version}`)
-			end
+		if success and versionData and self:IsVersionOutdated(MetaData.version, versionData.version) then
+			Utilities.GBWarn(`Gamebeast SDK is out of date! Please update to the latest version. {MetaData.version} -> {versionData.version}`)
 		end
 	end)
 
 	-- Start up, bootstrap configurations and experiments
 
 	local function fetchBootstrap()
-		local success, bootstrap = GBRequests:GBRequestAsync("v2/bootstrap")
-		if success then
-			return bootstrap
-		else
-			return nil
-		end
+		local success, bootstrap, statusCode = GBRequests:GBRequestAsync("v2/bootstrap")
+		return (if success then bootstrap else nil), statusCode
 	end
 
-	local bootstrap = fetchBootstrap()
+	-- An apply that throws counts as a failed attempt. Unprotected, it ended this thread, so
+	-- status polling never started and the server stayed on whatever it had for its whole life.
+	local function tryApply(payload, isInit : boolean) : boolean
+		local didApply, applyError = pcall(self.ApplyBootstrap, self, payload, isInit)
+		if not didApply then
+			Utilities.GBWarn("Failed to apply configurations from Gamebeast:", applyError)
+		end
+		return didApply
+	end
 
-	-- If no response or failed status, attempt to recover
-	if not bootstrap then
+	local bootstrap, statusCode = fetchBootstrap()
+
+	-- If no response, failed status or a failed apply, attempt to recover
+	if not (bootstrap and tryApply(bootstrap, true)) then
 		Utilities.GBWarn("Couldn't get configurations from Gamebeast. Attempting to load from backup...")
 
-		-- Try to get datastore backed up configs so the game can run while we reconnect
+		-- Try to get datastore backed up configs so the game can run while we reconnect.
+		-- Once they are applied, applying live data is no longer an initialization: diff and replicate.
+		local isInit = true
 		local backupConfigurations = self:GetBackupConfigs()
-		local didApplyBackup = false
-		if backupConfigurations then
-			self:ApplyBootstrap({
-				configurations = backupConfigurations,
-				experiments = { user = {}, server = {} },
-				requiredProperties = {},
-			}, true)
-			didApplyBackup = true
+		if backupConfigurations and tryApply({
+			configurations = backupConfigurations,
+			experiments = { user = {}, server = {} },
+			requiredProperties = {},
+		}, true) then
+			isInit = false
 		end
 
 		-- Wait for a live connection; everything else in the SDK depends on it
+		local attempt = 0
 		repeat
-			task.wait(CONNECTION_RETRY_DELAY)
-			Utilities.GBWarn("Attempting to establish connection...")
-			bootstrap = fetchBootstrap()
-		until bootstrap
+			attempt += 1
+			local delay = self:GetConnectionRetryDelay(attempt, statusCode)
+			Utilities.GBWarn(`Couldn't reach Gamebeast; retrying in {math.ceil(delay)}s.`)
+			task.wait(delay)
 
-		Utilities.GBWarn("Connection established, fetching configurations...")
+			bootstrap, statusCode = fetchBootstrap()
+		until bootstrap and tryApply(bootstrap, isInit)
 
-		-- If the backup was applied, this is no longer an initialization: diff and replicate
-		self:ApplyBootstrap(bootstrap, not didApplyBackup)
-	else
-		self:ApplyBootstrap(bootstrap, true)
+		Utilities.GBWarn("Connection to Gamebeast established.")
 	end
 
 	-- When experiment assignments change, recompose the affected evaluated views

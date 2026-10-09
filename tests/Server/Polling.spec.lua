@@ -121,4 +121,44 @@ return function()
             expect(Updater:GetPollDelay(1)).to.equal(POLL_RATE)
         end)
     end)
+
+    describe("GetConnectionRetryDelay", function()
+        it("should double from 10s up to 5 minutes", function()
+            expect(Updater:GetConnectionRetryDelay(1, nil, 0)).to.equal(10)
+            expect(Updater:GetConnectionRetryDelay(2, nil, 0)).to.equal(20)
+            expect(Updater:GetConnectionRetryDelay(3, nil, 0)).to.equal(40)
+            expect(Updater:GetConnectionRetryDelay(10, nil, 0)).to.equal(300)
+        end)
+
+        it("should go straight to the longest wait when the key is rejected", function()
+            expect(Updater:GetConnectionRetryDelay(1, 401, 0)).to.equal(300)
+            expect(Updater:GetConnectionRetryDelay(1, 403, 0)).to.equal(300)
+        end)
+
+        it("should only ever add jitter", function()
+            expect(Updater:GetConnectionRetryDelay(1, nil, 1)).to.equal(12.5)
+            for _ = 1, 100 do
+                local delay = Updater:GetConnectionRetryDelay(2)
+                expect(delay >= 20 and delay <= 25).to.equal(true)
+            end
+        end)
+    end)
+
+    describe("IsVersionOutdated", function()
+        it("should compare version parts as numbers", function()
+            expect(Updater:IsVersionOutdated("v1.9.0", "v1.10.0")).to.equal(true)
+            expect(Updater:IsVersionOutdated("v1.10.0", "v1.9.0")).to.equal(false)
+            expect(Updater:IsVersionOutdated("v1.0.0", "v1.0.1")).to.equal(true)
+            expect(Updater:IsVersionOutdated("v1.0.0", "v1.0.0")).to.equal(false)
+        end)
+
+        it("should accept versions with or without the v prefix", function()
+            expect(Updater:IsVersionOutdated("v1.0.0", "1.1.0")).to.equal(true)
+        end)
+
+        it("should not warn when a version can't be read", function()
+            expect(Updater:IsVersionOutdated("v1.0.0", "latest")).to.equal(false)
+            expect(Updater:IsVersionOutdated("v1.0.0", nil)).to.equal(false)
+        end)
+    end)
 end
