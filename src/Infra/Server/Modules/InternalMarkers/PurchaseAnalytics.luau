@@ -61,7 +61,8 @@ local function GetProductInfo(player : Player | number, itemId : number, itemTyp
 			itemInfo = Utilities.getProductInfo(itemId, itemType)
 		end
 
-		if not itemInfo then
+		-- Only a player still in the server has a client to ask
+		if not itemInfo and Utilities.resolvePlayerObject(player) then
 			itemInfo = ServerClientInfoHandler:GetProductInfoForPlayer(player, itemId, itemType)
 			fromClient = true
 		end
@@ -96,18 +97,24 @@ end
 function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, fromReceipt : boolean, itemId : number, itemType : Enum.InfoType, metadataOverride : {[string] : any}?)
 	local player = Utilities.resolvePlayerObject(player)
 
+	-- Nothing to report without product info. Subscriptions used to be let through here and then
+	-- errored indexing the missing info, so the marker was lost anyway.
 	local itemInfo = GetProductInfo(player, itemId, itemType)
-	if not itemInfo and itemType ~= Enum.InfoType.Subscription then
+	if not itemInfo then
 		return
 	end
 
 	--NOTE: In the event the client holds onto the request forever, we dont want to block the server.
-	local clientData = if itemInfo.FromClient then itemInfo.Data else ServerClientInfoHandler:GetProductInfoForPlayer(player, itemId, itemType)
+	-- Nil when the client can't answer (no client SDK, or the request failed); the base price is used then.
+	-- A receipt can be processed after the player has left, leaving no client to ask.
+	local clientData = if itemInfo.FromClient then itemInfo.Data
+		elseif player then ServerClientInfoHandler:GetProductInfoForPlayer(player, itemId, itemType)
+		else nil
 
-	-- Sanity check the client price
-	if clientData.PriceInRobux and itemInfo.Data.PriceInRobux > 0 then
-		-- Price cant be greater than the base price.
-		if clientData.PriceInRobux > itemInfo.Data.PriceInRobux then
+	-- Sanity check the client price: it can't be greater than the base price
+	local basePrice = itemInfo.Data.PriceInRobux
+	if clientData and clientData.PriceInRobux and basePrice and basePrice > 0 then
+		if clientData.PriceInRobux > basePrice then
 			clientData = nil
 		end
 	end
