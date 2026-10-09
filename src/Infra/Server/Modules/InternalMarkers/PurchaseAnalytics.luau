@@ -48,6 +48,38 @@ local DevProductEventDebounce = {}
 
 --= Internal Functions =--
 
+local function IsString(value : any, maxLength : number) : boolean
+	return type(value) == "string" and #value <= maxLength
+end
+
+--[[
+	Product info a client reported, keeping only the fields the Purchase marker uses and only if
+	they're well formed; nil if nothing usable is left. The client is untrusted: its price feeds
+	revenue (for subscriptions it is the only source), and a non-numeric one errored the price check.
+]]
+local function SanitizeClientProductInfo(data : any) : {[string] : any}?
+	if type(data) ~= "table" then
+		return nil
+	end
+
+	local price = data.PriceInRobux
+	if price ~= nil and not (type(price) == "number" and price == price and price >= 0 and price ~= math.huge) then
+		return nil
+	end
+
+	return {
+		PriceInRobux = price,
+		DisplayPrice = if IsString(data.DisplayPrice, 32) then data.DisplayPrice else nil,
+		Name = if IsString(data.Name, 200) then data.Name else nil,
+		Description = if IsString(data.Description, 1000) then data.Description else nil,
+	}
+end
+
+-- Asks the player's client for product info, sanitized
+local function GetClientProductInfo(player : Player | number, itemId : number, itemType : Enum.InfoType) : {[string] : any}?
+	return SanitizeClientProductInfo(ServerClientInfoHandler:GetProductInfoForPlayer(player, itemId, itemType))
+end
+
 local function GetProductInfo(player : Player | number, itemId : number, itemType : Enum.InfoType) : {FromClient : boolean, Data : {[string] : any}}?
 	-- Check if we've already retrieved product info
 	if not ProductInfoCacheMap[itemType] then
@@ -63,7 +95,7 @@ local function GetProductInfo(player : Player | number, itemId : number, itemTyp
 
 		-- Only a player still in the server has a client to ask
 		if not itemInfo and Utilities.resolvePlayerObject(player) then
-			itemInfo = ServerClientInfoHandler:GetProductInfoForPlayer(player, itemId, itemType)
+			itemInfo = GetClientProductInfo(player, itemId, itemType)
 			fromClient = true
 		end
 		
@@ -108,7 +140,7 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, fromRecei
 	-- Nil when the client can't answer (no client SDK, or the request failed); the base price is used then.
 	-- A receipt can be processed after the player has left, leaving no client to ask.
 	local clientData = if itemInfo.FromClient then itemInfo.Data
-		elseif player then ServerClientInfoHandler:GetProductInfoForPlayer(player, itemId, itemType)
+		elseif player then GetClientProductInfo(player, itemId, itemType)
 		else nil
 
 	-- Sanity check the client price: it can't be greater than the base price
@@ -184,16 +216,34 @@ end
 
 --= Initializers =--
 function PurchaseAnalytics:Init()
+	-- The prompt-finished events aren't proof of a purchase on their own (they have been fired by
+	-- exploits without one), so a pass or asset is only recorded once the player is seen to own it.
+	-- Subscriptions are checked the same way below.
+
 	-- Purchase records handler for gamepasses
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamePassId, wasPurchased)
-		if wasPurchased then
+		if not wasPurchased then
+			return
+		end
+
+		local success, ownsPass = pcall(function()
+			return MarketplaceService:UserOwnsGamePassAsync(player.UserId, gamePassId)
+		end)
+		if success and ownsPass then
 			self:UpdatePlayerSpend(player, false, gamePassId, Enum.InfoType.GamePass)
 		end
 	end)
 
 	-- Purchase records handler for assets / other
 	MarketplaceService.PromptPurchaseFinished:Connect(function(player, assetId, wasPurchased)
-		if wasPurchased then
+		if not wasPurchased then
+			return
+		end
+
+		local success, ownsAsset = pcall(function()
+			return MarketplaceService:PlayerOwnsAsset(player, assetId)
+		end)
+		if success and ownsAsset then
 			self:UpdatePlayerSpend(player, false, assetId, Enum.InfoType.Asset)
 		end
 	end)
