@@ -365,9 +365,14 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 				completeTask("clientInfo")
 			end
 
-			-- Send the marker without localization rather than hold it until shutdown, in case an
-			-- engine lookup never came back
+			-- Send the marker without whatever is still missing rather than hold it until shutdown:
+			-- an engine lookup that never came back, launch data, or experiment assignment while the
+			-- assignment endpoint is down. Held markers were lost on a crash and rejected as stale
+			-- once a server ran past a day. Without assignments the backend attributes the marker to
+			-- no experiment, which beats not having it at all.
 			completeTask("localization")
+			completeTask("launchData")
+			completeTask("experimentAssignments")
 		end))
 
 		-- Ensure marker gets fired with device info on timeout or bind to close
@@ -433,7 +438,12 @@ function EngagementMarkers:Init()
 			local lastReportElapsed = tick() - LastEventReportTime
 
 			if lastReportElapsed >= markerFlushRate then
-				self:SendMarkers()
+				-- Protected so one bad batch can't end this loop; before, it left markers going out
+				-- only when the queue filled to its limit, for the rest of the server's life
+				local didSend, sendError = pcall(self.SendMarkers, self)
+				if not didSend then
+					Utilities.GBWarn("Failed to send engagement markers:", sendError)
+				end
 			end
 		end
 	end)

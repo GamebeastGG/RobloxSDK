@@ -757,6 +757,15 @@ function Experiments:OnAssignmentsResolvedForPlayer(player: Player, callback: ()
 		end
 	end))
 
+	-- Logout and teleport markers subscribe from inside PlayerRemoving, after the listener above can
+	-- hear it. ServerGate's removal fires a few seconds later, so it still releases them instead
+	-- of leaving them waiting on assignments that will never arrive for a departed player.
+	listenerCleaner:Add(ServerGate:OnPlayerRemoved(function(removedPlayer: Player)
+		if removedPlayer == player then
+			resolve()
+		end
+	end))
+
 	return connection
 end
 
