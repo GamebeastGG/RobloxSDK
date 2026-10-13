@@ -17,6 +17,7 @@ local Experiments = { }
 --= Dependencies =--
 
 local InternalExperiments = require(script.Parent.Parent.Modules.InternalExperiments) ---@module InternalExperiments
+local ServerGate = require(script.Parent.Parent.Modules.ServerGate) ---@module ServerGate
 local Types = require(script.Parent.Parent.Parent.Types)
 
 --= Types =--
@@ -26,6 +27,9 @@ local Types = require(script.Parent.Parent.Parent.Types)
 --= Constants =--
 
 --= Variables =--
+
+-- Per-player assignment subscriptions, disconnected when the player leaves
+local SubscriptionsByPlayer = {} :: { [Player] : { RBXScriptConnection } }
 
 --= Public Variables =--
 
@@ -140,11 +144,22 @@ function Experiments:GetServerAssignments() : { Types.ExperimentAssignment }
 end
 
 function Experiments:OnAssignmentsChangedForPlayer(player : Player, callback : (assignments : { Types.ExperimentAssignment }) -> ()) : RBXScriptConnection
-    return InternalExperiments.OnPlayerAssignmentsChanged:Connect(function(changedPlayer : Player)
+    local connection = InternalExperiments.OnPlayerAssignmentsChanged:Connect(function(changedPlayer : Player)
         if changedPlayer == player then
             callback(BuildAssignments(player))
         end
     end)
+
+    -- Ends when the player leaves (see the removal handler below); left to the developer, one that
+    -- was never disconnected kept the Player and ran on every assignment change for the server's life
+    local subscriptions = SubscriptionsByPlayer[player]
+    if not subscriptions then
+        subscriptions = {}
+        SubscriptionsByPlayer[player] = subscriptions
+    end
+    table.insert(subscriptions, connection)
+
+    return connection
 end
 
 function Experiments:OnServerAssignmentsChanged(callback : (assignments : { Types.ExperimentAssignment }) -> ()) : RBXScriptConnection
@@ -186,6 +201,22 @@ function Experiments:GetGroupForPlayer(player : Player) : Types.ExperimentGroupM
         experimentName = assignment.experimentName,
         groupName = assignment.groupLabel,
     }
+end
+
+--= Initializers =--
+do
+    ServerGate:OnPlayerRemoved(function(player : Player)
+        local subscriptions = SubscriptionsByPlayer[player]
+        SubscriptionsByPlayer[player] = nil
+
+        -- Deferred so the subscriptions still hear the assignment change the player's removal fires
+        -- (their assignments clearing), which is raised by a listener on this same signal
+        task.defer(function()
+            for _, subscription in subscriptions or {} do
+                subscription:Disconnect()
+            end
+        end)
+    end)
 end
 
 --= Return Module =--

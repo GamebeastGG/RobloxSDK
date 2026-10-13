@@ -70,6 +70,10 @@ local ClientPayloadVersion = 0
 local SharedClientPayload : { version : number, payload : any }? = nil
 local ClientPayloadByPlayer = ServerGate:GetCache()
 
+-- Per-player config subscriptions, disconnected when the player leaves. A plain table rather than a
+-- ServerGate cache, since those are cleared before the removal signal that empties this one.
+local SubscriptionsByPlayer = {} :: { [Player] : { RBXScriptConnection } }
+
 local ConfigsReady = false
 local ActiveConfigs = {} :: { [number] : ConfigEntry }
 -- Consumer path identifiers resolve alias first, then name, then id (as a string)
@@ -380,7 +384,7 @@ function InternalConfigs:OnChanged(player: Player?, targetConfig : string | {str
 	end
 
 	-- Establish bindable connection
-	return BatchConfigUpdatedSignal:Connect(function(updatedPlayer: Player?, configId: number, changes : {{path : {string}, newValue : any, oldValue : any}}, oldConfigs : any)
+	local connection = BatchConfigUpdatedSignal:Connect(function(updatedPlayer: Player?, configId: number, changes : {{path : {string}, newValue : any, oldValue : any}}, oldConfigs : any)
 		local isServerChange = (updatedPlayer == nil)
 
 		-- If subscribed to server changes, ignore player-specific changes
@@ -421,6 +425,20 @@ function InternalConfigs:OnChanged(player: Player?, targetConfig : string | {str
 			end
 		end
 	end)
+
+	-- A player's subscriptions end when they leave. Left to the developer, an OnChangedForPlayer or
+	-- ObserveForPlayer that was never disconnected kept the Player, and a check on every config change,
+	-- for the rest of the server's life.
+	if player then
+		local subscriptions = SubscriptionsByPlayer[player]
+		if not subscriptions then
+			subscriptions = {}
+			SubscriptionsByPlayer[player] = subscriptions
+		end
+		table.insert(subscriptions, connection)
+	end
+
+	return connection
 end
 
 function InternalConfigs:_checkConfigChanged(oldConfig, newConfig) : { {path : {string}, newValue : any, oldValue : any} }
@@ -753,6 +771,14 @@ end
 
 --= Initializers =--
 function InternalConfigs:Init()
+
+	ServerGate:OnPlayerRemoved(function(player : Player)
+		local subscriptions = SubscriptionsByPlayer[player]
+		SubscriptionsByPlayer[player] = nil
+		for _, subscription in subscriptions or {} do
+			subscription:Disconnect()
+		end
+	end)
 
 	-- Provide clients their full privacy-filtered config payload.
 	GetConfigRemoteFunc.OnServerInvoke = function (player: Player)
