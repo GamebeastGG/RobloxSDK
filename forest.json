@@ -1,5 +1,8 @@
 {
+  "author": "gamebeast",
   "dependencies": {},
+  "description": "Roblox SDK for the Gamebeast analytics platform",
+  "license": "SEE LICENSE IN LICENSE",
   "mounts": {
     "tests/DevPackages": {
       "dependencies": {
@@ -7,5 +10,8 @@
       }
     }
   },
-  "platform": "roblox"
+  "name": "RobloxSDK",
+  "platform": "roblox",
+  "root": "src/init.lua",
+  "version": "1.0.0"
 }
