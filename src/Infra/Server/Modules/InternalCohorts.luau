@@ -17,8 +17,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 --= Dependencies =--
 
-local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
-local Utilities = shared.GBMod("Utilities") ---@module Utilities
+local GBRequests = require(script.Parent.GBRequests) ---@module GBRequests
+local Utilities = require(script.Parent.Utilities) ---@module Utilities
 
 --= Types =--
 

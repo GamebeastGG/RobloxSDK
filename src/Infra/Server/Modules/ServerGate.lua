@@ -19,8 +19,8 @@ local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
-local Signal = shared.GBMod("Signal") ---@module Signal
-local Cleaner = shared.GBMod("Cleaner") ---@module Cleaner
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal) ---@module Signal
+local Cleaner = require(script.Parent.Parent.Parent.Shared.Modules.Cleaner) ---@module Cleaner
 
 --= Types =--
 

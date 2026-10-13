@@ -20,9 +20,9 @@ local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
-local Utilities = shared.GBMod("Utilities") ---@module Utilities
-local Signal = shared.GBMod("Signal") ---@module Signal
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
+local Utilities = require(script.Parent.Utilities) ---@module Utilities
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal) ---@module Signal
+local ServerGate = require(script.Parent.ServerGate) ---@module ServerGate
 
 --= Types =--
 
@@ -79,28 +79,48 @@ function LaunchDataResolver:Init()
         end
 
         local joinData = player:GetJoinData()
-        local launchData = joinData.LaunchData
+        local rawLaunchData = joinData.LaunchData
         local attemptCount = 0
 
-        while attemptCount < 10 and launchData == "" do
+        while attemptCount < 10 and rawLaunchData == "" do
             task.wait(0.5)
             attemptCount += 1
 
             local latestJoinData = player:GetJoinData()
-            launchData = latestJoinData.LaunchData
+            rawLaunchData = latestJoinData.LaunchData
         end
 
-        if launchData ~= "" then
-            local success, launchDataJson = pcall(function()
-                return HttpService:JSONDecode(launchData)
+        if rawLaunchData ~= "" then
+            -- EncodingService is fetched here, not at module scope, so an engine without it only loses
+            -- base64 support instead of failing this module's require (which nothing guards).
+            local base64Decoded, launchDataBuffer = pcall(function()
+                return game:GetService("EncodingService"):Base64Decode(buffer.fromstring(rawLaunchData))
             end)
 
-            if success then
-                ResolveData(player, launchDataJson)
-                return
-            else
-                Utilities.GBLog("Failed to decode launch data JSON for player " .. player.Name .. ": " .. tostring(launchDataJson))
+            local function decodeJson(value : string)
+                return pcall(function()
+                    return HttpService:JSONDecode(value)
+                end)
             end
+
+            -- Fall back to the raw string, since raw JSON that happens to be valid base64 (a bare
+            -- number, say) decodes to bytes that aren't JSON
+            local candidates = if base64Decoded
+                then { buffer.tostring(launchDataBuffer), rawLaunchData }
+                else { rawLaunchData }
+
+            local lastError
+            for _, candidate in candidates do
+                local success, launchDataJson = decodeJson(candidate)
+                if success then
+                    ResolveData(player, launchDataJson)
+                    return
+                end
+
+                lastError = launchDataJson
+            end
+
+            Utilities.GBLog("Failed to decode launch data JSON for player " .. player.Name .. ": " .. tostring(lastError))
         end
 
         ResolveData(player, nil)

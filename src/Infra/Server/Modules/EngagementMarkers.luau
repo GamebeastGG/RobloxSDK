@@ -20,18 +20,19 @@ local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
-local Timer = shared.GBMod("Timer") ---@module Timer
-local Signal = shared.GBMod("Signal") ---@module Signal
-local Cleaner = shared.GBMod("Cleaner")
-local Utilities = shared.GBMod("Utilities")
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
-local GBRequests = shared.GBMod("GBRequests") ---@module GBRequests
-local Experiments = shared.GBMod("InternalExperiments") ---@module InternalExperiments
-local InternalConfigs = shared.GBMod("InternalConfigs") ---@module InternalConfigs
-local SignalConnection = shared.GBMod("SignalConnection") ---@module SignalConnection
-local LocalizationCache = shared.GBMod("LocalizationCache") ---@module LocalizationCache
-local LaunchDataResolver = shared.GBMod("LaunchDataResolver") ---@module LaunchDataResolver
-local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
+local Timer = require(script.Parent.Parent.Parent.Shared.Modules.Timer) ---@module Timer
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal) ---@module Signal
+local Cleaner = require(script.Parent.Parent.Parent.Shared.Modules.Cleaner)
+local Utilities = require(script.Parent.Utilities)
+local DataCache = require(script.Parent.Parent.Parent.Shared.Modules.DataCache)
+local ServerGate = require(script.Parent.ServerGate) ---@module ServerGate
+local GBRequests = require(script.Parent.GBRequests) ---@module GBRequests
+local Experiments = require(script.Parent.InternalExperiments) ---@module InternalExperiments
+local InternalConfigs = require(script.Parent.InternalConfigs) ---@module InternalConfigs
+local SignalConnection = require(script.Parent.Parent.Parent.Shared.Modules.Signal.SignalConnection) ---@module SignalConnection
+local LocalizationCache = require(script.Parent.LocalizationCache) ---@module LocalizationCache
+local LaunchDataResolver = require(script.Parent.LaunchDataResolver) ---@module LaunchDataResolver
+local ServerClientInfoHandler = require(script.Parent.ServerClientInfoHandler) ---@module ServerClientInfoHandler
 
 --= Types =--
 
@@ -42,7 +43,7 @@ local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@modu
 local CLIENT_DATA_TIMEOUT = RunService:IsStudio() and 10 or 45
 local MAX_EVENT_QUEUE_SIZE = 1000
 local QUEUE_CHECK_TIME = 5
-local MAX_EVENT_REPORT_TIME = 10
+local MAX_REJECTION_REASONS_LOGGED = 5
 local ALLOWED_VALUE_TYPES = {
 	["string"] = true,
 	["number"] = true,
@@ -59,8 +60,8 @@ local DROP_MARKER_CODES = {
 
 local WaitingPlayerMarkers = {}
 local MarkerQueue = {}
--- Map of unique session IDs for users for player-associated markers
-local SessionIds = ServerGate:GetCache() -- Use ServerGate cache to automatically clear on player leave
+-- Session IDs for player markers
+local SessionIds = ServerGate:GetCache() -- Cleared on player leave
 local LastEventReportTime = 0
 local ClientInfoWarned = false
 
@@ -106,9 +107,11 @@ end
 local function AddMarker(marker)
 	table.insert(MarkerQueue, marker)
 	
-	-- If marker queue size limit reached then send batch
+	-- Spawned since markers are added from threads that must not yield, including the shutdown flush
 	if #MarkerQueue >= MAX_EVENT_QUEUE_SIZE then
-		EngagementMarkers:SendMarkers()
+		task.spawn(function()
+			EngagementMarkers:SendMarkers()
+		end)
 	end
 end
 
@@ -131,9 +134,25 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 			MarkerQueue = {}
 		end
 		
-		local success, errorBody = GBRequests:GBRequestAsync("v1/markers", data)
+		local success, responseBody = GBRequests:GBRequestAsync("v1/markers", data)
+
+		-- A successful batch can still have some markers rejected (invalid shape, subscription limits)
+		if success and responseBody and (responseBody.rejectedMarkersCount or 0) > 0 then
+			local reasons = {}
+			for index, rejected in responseBody.rejectedMarkers or {} do
+				if index > MAX_REJECTION_REASONS_LOGGED then
+					break
+				end
+				local markerType = type(rejected.marker) == "table" and rejected.marker.type or "unknown"
+				table.insert(reasons, `{markerType}: {rejected.reason}`)
+			end
+
+			Utilities.GBWarn(`{responseBody.rejectedMarkersCount} of the {#data.markers} markers sent were rejected by Gamebeast: {table.concat(reasons, "; ")}`)
+		end
+
 		if not success then
-			-- If request failed, add markers back to queue for retry
+			-- Not resent here, the valid markers go to the developer through MarkersFailed to retry.
+			-- Resending here too would duplicate them, since the backend doesn't de-duplicate.
 			local toRetry = {}
 			local invalidMarkerCount = 0
 			for _, marker in data.markers do
@@ -155,19 +174,19 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 				Utilities.GBWarn(`{invalidMarkerCount} of the {#data.markers} sent are invalid and will not be retried.`)
 			end
 
-			if errorBody and errorBody.errorCode and DROP_MARKER_CODES[errorBody.errorCode] then
-				return false, errorBody -- Drop the markers if they were all rejected.
+			if responseBody and responseBody.errorCode and DROP_MARKER_CODES[responseBody.errorCode] then
+				return false, responseBody -- Rejected for a known reason, skip the generic warning
 			end
 
 			Utilities.GBWarn("Failed to send engagement markers to Gamebeast.")
 		end
-		return success, errorBody
+		return success, responseBody
 	end
 
 	return true
 end
 
--- Core function, should be used internally by SDK rather than fireMarker
+-- Shared by FireMarker and SDKMarker
 -- function EngagementMarkers:CreateMarker(source, markerType, player, position, value)
 function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", markerType : string, value : any | {[string] : any}, metaData : {[string] : any})
 	metaData = metaData or {}
@@ -210,10 +229,10 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 	end
 
 	if value ~= nil and valueType ~= "table" then
-		value = { value = value } -- Wrap non-table values in a table
+		value = { value = value }
 	end
 	
-	-- Interface allows for player instance or userId. We already validated args types, so just handle accordingly.
+	-- Player may be an instance or a userId
 	local player = Utilities.resolvePlayerObject(player)
 	
 	-- Marker fields
@@ -236,11 +255,8 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			["inputType"] = nil, -- Resolved later
 			["deeplinkData"] = nil, -- Resolved later
 			["position"] = position ~= nil and EncodeVector3(position) or nil,
-			["language"] = player and LocalizationCache:GetLocaleId(player) or nil,
-			["country"] = player and LocalizationCache:GetRegionId(player) or nil,
-			["experimentGroupId"] = player
-				and Experiments.AssignedGroupIdByPlayer[player]
-				or Experiments.AssignedServerGroupId,
+			["language"] = nil, -- Resolved later
+			["country"] = nil, -- Resolved later
 		},
 	}
 
@@ -269,7 +285,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			entry.properties.deviceSubType = ServerClientInfoHandler:GetClientInfo(player, "deviceSubType")
 			entry.properties.inputType = ServerClientInfoHandler:GetClientInfo(player, "inputType")
 
-			-- Attempt to resolve session ID from client info so we preserve it across game sessions.
+			-- Prefer the client's session ID, which carries over teleports within the game
 			local sessionId = ServerClientInfoHandler:GetClientInfo(player, "sessionId")
 			if sessionId and sessionId ~= "" then
 				entry.sessionId = sessionId
@@ -282,7 +298,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 
 			AddMarker(entry)
 
-			-- Remove from waiting list if it exists
+			-- Left in place on shutdown, which is iterating this list
 			if not shutdown then
 				local index = table.find(WaitingPlayerMarkers, pendingMarkerData)
 				if index then
@@ -295,7 +311,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 
 		-- Task manager
 
-		-- Will only add tasks if they arent already finished and the connection is still active.
+		-- A nil or disconnected connection means the callback already ran
 		local function addTask(taskName : string, connection : RBXScriptConnection?)
 			if not pendingMarkerData.tasks[taskName] and connection ~= nil and connection.Connected == true then
 				pendingMarkerData.activeTasks += 1
@@ -335,23 +351,28 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			end
 		end
 
-		-- Stop wating after some time if tasks are not resolved
+		-- Stop waiting on unresolved tasks after a timeout
 		local dataFetchTimer = Timer.new(CLIENT_DATA_TIMEOUT)
 		pendingMarkerData.pendingCleaner:Add(dataFetchTimer)
 		pendingMarkerData.pendingCleaner:Add(dataFetchTimer:OnEnd(function()
-			if not pendingMarkerData.tasks["clientInfo"] then
-				return
+			if pendingMarkerData.tasks["clientInfo"] then
+				if not ServerClientInfoHandler:IsClientInfoResolved(player) and ClientInfoWarned == false then
+					Utilities.GBWarn("Failed to resolve client info, did you forget to :Setup() Gamebeast SDK on the client?")
+					ClientInfoWarned = true
+				end
+
+				completeTask("clientInfo")
 			end
 
-			if not ServerClientInfoHandler:IsClientInfoResolved(player) and ClientInfoWarned == false then
-				Utilities.GBWarn("Failed to resolve client info, did you forget to :Setup() Gamebeast SDK on the client?")
-				ClientInfoWarned = true
-			end
-
-			completeTask("clientInfo")
+			-- Send the marker without whatever is still missing rather than hold it. Markers held too long
+			-- are lost on a crash or rejected as stale; without assignments the marker just counts toward
+			-- no experiment.
+			completeTask("localization")
+			completeTask("launchData")
+			completeTask("experimentAssignments")
 		end))
 
-		-- Ensure marker gets fired with device info on timeout or bind to close
+		-- Device and input type come from the client
 		addTask("clientInfo", ServerClientInfoHandler:OnClientInfoResolved(player, function()
 			completeTask("clientInfo")
 		end))
@@ -368,12 +389,20 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			completeTask("launchData")
 		end))
 
-		if entry.properties.experimentGroupId == nil then
-			addTask("experimentGroup", Experiments:ListenForPlayerAssignment(player, function (groupId: number?)
-				entry.properties.experimentGroupId = groupId
-				completeTask("experimentGroup")
-			end))
-		end
+		-- Localization comes from engine lookups that yield, so the marker waits on them here
+		-- rather than in the caller's thread
+		addTask("localization", LocalizationCache:OnResolved(player, function(localization)
+			entry.properties.language = localization.localeId
+			entry.properties.country = localization.regionId
+
+			completeTask("localization")
+		end))
+
+		-- The backend attributes markers to experiments from the player's stored assignments, so wait
+		-- for those to resolve
+		addTask("experimentAssignments", Experiments:OnAssignmentsResolvedForPlayer(player, function()
+			completeTask("experimentAssignments")
+		end))
 
 		if pendingMarkerData.activeTasks <= 0 then
 			resolved()
@@ -383,7 +412,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 	end)
 end
 
--- Fire an engagement marker. Used by devs via API module, wraps createMarker to declare source.
+-- Used by the public Markers API
 -- Usage: EngagementMarkers:FireMarker("LevelUp", {playerLevel = player:GetAttribute("Level")}, {player = player, position = player.Character.PrimaryPart.Position})
 function EngagementMarkers:FireMarker(...)
 	self:_createMarker("server", ...)
@@ -396,18 +425,20 @@ end
 
 --= Initializers =--
 function EngagementMarkers:Init()
-	-- Check if time limit has elapsed and send current data, if any
+	-- Flush the queue every markerFlushRate seconds
 	task.spawn(function()
-		while task.wait(QUEUE_CHECK_TIME) do
-			-- Check if we need to send queued events to GB
+		while true do
+			local markerFlushRate = DataCache:Get("Settings").markerFlushRate
+			task.wait(math.min(QUEUE_CHECK_TIME, markerFlushRate))
+
 			local lastReportElapsed = tick() - LastEventReportTime
 
-			if lastReportElapsed >= MAX_EVENT_REPORT_TIME then
-				self:SendMarkers()
-			end
-			
-			if InternalConfigs:WaitForConfigsReady() then
-				MAX_EVENT_REPORT_TIME = InternalConfigs:GetActiveConfig("GBConfigs")["GBRates"]["EngagementMarkers"]
+			if lastReportElapsed >= markerFlushRate then
+				-- Protected so one bad batch can't end this loop
+				local didSend, sendError = pcall(self.SendMarkers, self)
+				if not didSend then
+					Utilities.GBWarn("Failed to send engagement markers:", sendError)
+				end
 			end
 		end
 	end)

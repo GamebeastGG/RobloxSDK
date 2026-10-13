@@ -2,7 +2,7 @@
 	The Gamebeast SDK is Copyright © 2023 Gamebeast, Inc. to present.
 	All rights reserved.
 	
-	SocialHandler.luau
+	SocialHandler.lua
 	
 	Description:
         Handles tracking social interactions between players in the server.
@@ -19,10 +19,10 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module EngagementMarkers
-local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
-local PlayerStats = shared.GBMod("PlayerStats") ---@module PlayerStats
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
+local EngagementMarkers = require(script.Parent.Parent.EngagementMarkers) ---@module EngagementMarkers
+local ServerClientInfoHandler = require(script.Parent.Parent.ServerClientInfoHandler) ---@module ServerClientInfoHandler
+local PlayerStats = require(script.Parent.Parent.PlayerStats) ---@module PlayerStats
+local ServerGate = require(script.Parent.Parent.ServerGate) ---@module ServerGate
 
 --= Types =--
 

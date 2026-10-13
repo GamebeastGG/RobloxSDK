@@ -49,10 +49,16 @@ end
 
 --= Constructor =--
 
-function Signal.new() : Signal
+--[[
+    By default each listener gets its own deep copy of the arguments, so one can't change what the
+    next sees. Pass `copyArguments = false` for large, read-only arguments with many listeners.
+    Listeners then share the arguments and must not modify them.
+]]
+function Signal.new(options : { copyArguments : boolean? }?) : Signal
     local self = setmetatable({}, Signal)
 
     self._callbacks = {} :: {isOnce : boolean, callback : (any) -> ()}
+    self._copyArguments = not (options and options.copyArguments == false)
 
     return self
 end
@@ -66,6 +72,9 @@ function Signal:_createConnection(isOnce : boolean, callback : (any) -> ()) : Si
     }
 
     callbackData.connection = SignalConnection.new(function()
+        -- Lets a Fire already in progress skip it, since it iterates over a snapshot
+        callbackData.disconnected = true
+
         local index = table.find(self._callbacks, callbackData)
 
         if index then
@@ -86,49 +95,65 @@ function Signal:Once(callback : (any) -> ()) : SignalConnection
     return self:_createConnection(true, callback)
 end
 
+--[[
+    Yields until the next fire and returns its arguments. Resumed by the fire rather than polling,
+    since many config subscriptions can be waiting at once.
+]]
 function Signal:Wait() : ...any
-    local isFired = false
-    local data = nil
+    local thread = coroutine.running()
 
-    local callbackData = {
-        isOnce = false,
-        callback = function(...)
-            isFired = true
-            data = table.pack(...)
+    self:_createConnection(true, function(...)
+        -- A waiter whose thread was cancelled meanwhile has nothing left to resume
+        if coroutine.status(thread) == "suspended" then
+            task.spawn(thread, ...)
         end
-    }
-    table.insert(self._callbacks, callbackData)
+    end)
 
-    repeat task.wait() until isFired
-
-    local index = table.find(self._callbacks, callbackData)
-    if index then
-        table.remove(self._callbacks, index)
-    end
-
-    return table.unpack(data)
+    return coroutine.yield()
 end
 
+--[[
+    Calls every listener connected when the fire begins. One connected mid-fire waits for the next
+    fire, and one disconnected mid-fire by an earlier listener is skipped, matching RBXScriptSignal.
+]]
 function Signal:Fire(...)
     local argCount = select("#", ...)
-    local lastLength = #self._callbacks
-    local currentIndex = 1
-    while currentIndex <= #self._callbacks do
-        local callbackData = self._callbacks[currentIndex]
-        local dataToSend = table.create(argCount)
-        for argIndex = 1, argCount do
-            local arg = select(argIndex, ...)
-            dataToSend[argIndex] = DeepCopy(arg)
+    local didFireOnce = false
+
+    for _, callbackData in table.clone(self._callbacks) do
+        if callbackData.disconnected then
+            continue
         end
 
-        task.spawn(callbackData.callback, table.unpack(dataToSend, 1, argCount))
+        -- Disconnected before it runs, so a fire from inside its own callback can't call it again.
+        -- Removed in one pass below, since Disconnect searches the list and many waiters can be pending.
         if callbackData.isOnce then
-            callbackData.connection:Disconnect()
+            callbackData.disconnected = true
+            callbackData.connection.Connected = false
+            didFireOnce = true
         end
 
-        local newLength = #self._callbacks
-        currentIndex += (1 - (lastLength - newLength))
-        lastLength = newLength
+        if self._copyArguments then
+            local dataToSend = table.create(argCount)
+            for argIndex = 1, argCount do
+                local arg = select(argIndex, ...)
+                dataToSend[argIndex] = DeepCopy(arg)
+            end
+
+            task.spawn(callbackData.callback, table.unpack(dataToSend, 1, argCount))
+        else
+            task.spawn(callbackData.callback, ...)
+        end
+    end
+
+    if didFireOnce then
+        local remaining = table.create(#self._callbacks)
+        for _, callbackData in self._callbacks do
+            if not callbackData.disconnected then
+                table.insert(remaining, callbackData)
+            end
+        end
+        self._callbacks = remaining
     end
 end
 

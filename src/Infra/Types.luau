@@ -7,15 +7,38 @@ type SDKSettings = {
 	sdkDebugEnabled : boolean,
 	-- Custom URL for the SDK, if any.
 	customUrl : string | nil,
-	-- Environment the SDK is set to.
-	environment : "production" | "studio" | nil
+	-- Environment the SDK is set to. Defaults to "studio" in Studio and "production" in live servers.
+	environment : ("production" | "studio")?,
+	-- Seconds between engagement marker batch flushes to the backend.
+	markerFlushRate : number,
+	-- Seconds between status polls for config and experiment changes. A floor: Gamebeast can ask
+	-- servers to poll less often, never more.
+	statusPollRate : number,
+	-- Seconds between re-requesting experiment assignments for all players and the server. This is
+	-- how dashboard assignment changes reach a live server.
+	assignmentRefreshRate : number,
+	-- Seconds between server state reports (players, server and client performance) to the backend.
+	serverReportRate : number
 }
 export type ServerSetupConfig = {
 	key : string | Secret,
 	sdkSettings : SDKSettings?
 }
 
---NOTE: The actual JSON type doesnt get represented cleanly in Roblox's intellesense. This is a simplified version for now.
+-- Settings Gamebeast:UpdateSettings can change at runtime. Omitted ones keep their value.
+-- `environment` and `customUrl` are fixed at setup, since loaded configs, experiments and the
+-- datastore backup are keyed to the environment they came from.
+export type RuntimeSDKSettings = {
+	sdkWarningsEnabled : boolean?,
+	includeWarningStackTrace : boolean?,
+	sdkDebugEnabled : boolean?,
+	markerFlushRate : number?,
+	statusPollRate : number?,
+	assignmentRefreshRate : number?,
+	serverReportRate : number?
+}
+
+--NOTE: The real JSON type doesn't render cleanly in Roblox intellisense, so this is simplified.
 export type JSON = any
 --[[{
     [string] : (number | string | boolean | JSON)
@@ -44,18 +67,31 @@ export type MarkersService = {
 	RetryFailedMarkersAsync : (self : MarkersService, failedMarkers : { {[string] : any} } ) -> boolean,
 }
 
-export type JobsService = {
-	SetCallback : (self : JobsService, jobName : string, callback : (jobData : {[string] : any}) -> (any)) -> ()
-}
-
-export type EventsService = {
-	GetEventData : (self : EventsService, event : string) -> JSON,
-	OnStart : (self : EventsService, event : string, callback : (data : JSON) -> ()) -> RBXScriptConnection,
-	OnEnd : (self : EventsService, event : string, callback : (data : JSON) -> ()) -> RBXScriptConnection,
-}
+-- Developer-defined experiment targeting property: a scalar or a list of one scalar type (max 100 items).
+export type ExperimentPropertyValue = string | number | boolean | { string | number | boolean }
 
 export type ExperimentsService = {
+	SetPlayerProperties: (self: ExperimentsService, player: Player, properties: { [string]: ExperimentPropertyValue }) -> (),
+	SetPlayerProperty: (self: ExperimentsService, player: Player, key: string, value: ExperimentPropertyValue?) -> (),
+	GetPlayerProperties: (self: ExperimentsService, player: Player) -> { [string]: ExperimentPropertyValue },
+	SetServerProperties: (self: ExperimentsService, properties: { [string]: ExperimentPropertyValue }) -> (),
+	SetServerProperty: (self: ExperimentsService, key: string, value: ExperimentPropertyValue?) -> (),
+	GetServerProperties: (self: ExperimentsService) -> { [string]: ExperimentPropertyValue },
+	GetAssignmentsForPlayer: (self: ExperimentsService, player: Player) -> { ExperimentAssignment },
+	GetServerAssignments: (self: ExperimentsService) -> { ExperimentAssignment },
+	OnAssignmentsChangedForPlayer: (self: ExperimentsService, player: Player, callback: (assignments: { ExperimentAssignment }) -> ()) -> RBXScriptConnection,
+	OnServerAssignmentsChanged: (self: ExperimentsService, callback: (assignments: { ExperimentAssignment }) -> ()) -> RBXScriptConnection,
+	ObserveAssignmentsForPlayer: (self: ExperimentsService, player: Player, callback: (assignments: { ExperimentAssignment }) -> ()) -> RBXScriptConnection,
+	-- Deprecated: use GetAssignmentsForPlayer / GetServerAssignments instead.
 	GetGroupForPlayer: (self: ExperimentsService, player: Player) -> ExperimentGroupMetadata?,
+}
+export type ExperimentAssignment = {
+	experimentId: number,
+	experimentName: string,
+	groupId: number,
+	groupLabel: string,
+	unitType: "user" | "server",
+	source: string?,
 }
 export type ExperimentGroupMetadata = {
 	experimentName: string,
@@ -66,6 +102,6 @@ export type CohortsService = {
 	GetCohortMembershipStatusAsync : (self : CohortsService, cohortName : string, userIds : { number }) -> { [ number ] : boolean }
 }
 
-export type Service = ConfigsService | MarkersService | EventsService | JobsService | ExperimentsService | CohortsService
+export type Service = ConfigsService | MarkersService | ExperimentsService | CohortsService
 
 return true

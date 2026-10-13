@@ -5,15 +5,10 @@
     Tester.luau
     
     Description:
-        Tester module to run tests.
-
-        Run tests in studio.
-        1. Press play
-        2. Switch to server context
-        3. Go to replicatedStorage and find the Test remote event
-        4. Look for the RunTest attributes
-        5. Set the attributes to true to run the test.
-        6. Check the output for the test results.    
+        Runs the TestEZ specs. In Studio:
+        1. Press play and switch to the server context
+        2. Set RunServerTest or RunClientTest on ReplicatedStorage.TestRunnerRemote to true
+        3. Check the output for the results
 --]]
 
 --= Root =--
@@ -29,7 +24,7 @@ local TestsFolder = ReplicatedFirst:WaitForChild("Tests")
 
 --= Dependencies =--
 
-local TestEZ = require(TestsFolder:WaitForChild("testez"))
+local TestEZ = require(TestsFolder:WaitForChild("DevPackages"):WaitForChild("testez"))
 
 --= Variables =--
 

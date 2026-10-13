@@ -24,13 +24,13 @@ local RunService = game:GetService("RunService")
 
 --= Dependencies =--
 
-local Utilities = shared.GBMod("Utilities")
-local LaunchDataResolver = shared.GBMod("LaunchDataResolver") ---@module LaunchDataResolver
-local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
-local PlayerStats = shared.GBMod("PlayerStats") ---@module PlayerStats
-local SocialHandler = shared.GBMod("SocialHandler") ---@module SocialHandler
-local ServerGate = shared.GBMod("ServerGate") ---@module ServerGate
-local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
+local Utilities = require(script.Parent.Parent.Utilities)
+local LaunchDataResolver = require(script.Parent.Parent.LaunchDataResolver) ---@module LaunchDataResolver
+local EngagementMarkers = require(script.Parent.Parent.EngagementMarkers) ---@module Markers
+local PlayerStats = require(script.Parent.Parent.PlayerStats) ---@module PlayerStats
+local SocialHandler = require(script.Parent.SocialHandler) ---@module SocialHandler
+local ServerGate = require(script.Parent.Parent.ServerGate) ---@module ServerGate
+local ServerClientInfoHandler = require(script.Parent.Parent.ServerClientInfoHandler) ---@module ServerClientInfoHandler
 
 --= Types =--
 
@@ -52,14 +52,14 @@ local PlacesInUniverse = {}
 --= Initializers =--
 function SessionMarkers:Init()
 	ServerGate:OnPlayerAdded(function(player : Player, cleaner)
-		-- Collect last position with this event given PlayerRemoving was inconsistent on character still existing for providing position for Logout markers
+		-- The character may be gone by PlayerRemoving, so the Logout position is taken here
 		cleaner:Add(player.CharacterRemoving:Connect(function(char)
 			local position = char.PrimaryPart and char.PrimaryPart.Position or nil
 			LastCharPositions[player] = position
 		end))
 		
 		local joinData = player:GetJoinData()
-		-- Check if the player teleported into the game. Only send login marker if they did not teleport in.
+		-- No Login marker for players teleporting in from another place in this game
         if joinData.SourceGameId ~= game.GameId then
             
             -- Send Login marker with relevant session information
@@ -112,7 +112,7 @@ function SessionMarkers:Init()
 		-- Collect last position for Logout marker
 		local position = LastCharPositions[player]
 		
-		-- Compute session length in addition to backend for reasons(?)
+		-- The client's join time carries over teleports within the game, so it spans the whole session
 		local clientJoinTime = ServerClientInfoHandler:GetClientInfo(player, "joinTime")
 		local sessionLength = Utilities.roundNum(os.time() - (clientJoinTime or PlayerStats:GetStat(player, "join_time")), 0.1)
 		local friendPlaytime = SocialHandler:GetTotalFriendPlaytime(player)
@@ -138,11 +138,10 @@ function SessionMarkers:Init()
 	end)
 
 	task.spawn(function()
-		-- Collect all places in the universe for sessionId preservation
+		-- Places in this game, to tell a teleport within it from leaving
 		local success, err = pcall(function()
 			local placesPages = AssetService:GetGamePlacesAsync()
 			while true do
-				-- Wait for the places to be loaded
 				for _, place in pairs(placesPages:GetCurrentPage()) do
 					if not PlacesInUniverse[place.PlaceId] then
 						PlacesInUniverse[place.PlaceId] = place

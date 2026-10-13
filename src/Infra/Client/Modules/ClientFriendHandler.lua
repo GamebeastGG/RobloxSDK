@@ -19,7 +19,7 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local ClientInfoHandler = shared.GBMod("ClientInfoHandler") ---@module ClientInfoHandler
+local ClientInfoHandler = require(script.Parent.ClientInfoHandler) ---@module ClientInfoHandler
 
 --= Types =--
 

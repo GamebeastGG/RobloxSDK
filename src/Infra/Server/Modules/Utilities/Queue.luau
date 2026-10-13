@@ -1,8 +1,7 @@
 -- The Gamebeast SDK is Copyright © 2023 Gamebeast, Inc. to present.
 -- All rights reserved.
 
--- Simple queue implementation.
--- Good to avoid an O(n) operation each time we want to process a single request.
+-- Queue with O(1) pop, unlike table.remove(t, 1)
 local queue = {}
 
 function queue.new()

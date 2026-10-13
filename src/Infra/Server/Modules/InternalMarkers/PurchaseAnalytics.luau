@@ -19,9 +19,9 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local Utilities = shared.GBMod("Utilities") ---@module Utilities
-local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module Markers
-local ServerClientInfoHandler = shared.GBMod("ServerClientInfoHandler") ---@module ServerClientInfoHandler
+local Utilities = require(script.Parent.Parent.Utilities) ---@module Utilities
+local EngagementMarkers = require(script.Parent.Parent.EngagementMarkers) ---@module Markers
+local ServerClientInfoHandler = require(script.Parent.Parent.ServerClientInfoHandler) ---@module ServerClientInfoHandler
 
 --= Types =--
 
@@ -48,6 +48,37 @@ local DevProductEventDebounce = {}
 
 --= Internal Functions =--
 
+local function IsString(value : any, maxLength : number) : boolean
+	return type(value) == "string" and #value <= maxLength
+end
+
+--[[
+	Keeps only the well-formed fields the Purchase marker uses; nil if the price is malformed.
+	The client is untrusted, and its price feeds revenue (the only source for subscriptions).
+]]
+local function SanitizeClientProductInfo(data : any) : {[string] : any}?
+	if type(data) ~= "table" then
+		return nil
+	end
+
+	local price = data.PriceInRobux
+	if price ~= nil and not (type(price) == "number" and price == price and price >= 0 and price ~= math.huge) then
+		return nil
+	end
+
+	return {
+		PriceInRobux = price,
+		DisplayPrice = if IsString(data.DisplayPrice, 32) then data.DisplayPrice else nil,
+		Name = if IsString(data.Name, 200) then data.Name else nil,
+		Description = if IsString(data.Description, 1000) then data.Description else nil,
+	}
+end
+
+-- Asks the player's client for product info, sanitized
+local function GetClientProductInfo(player : Player | number, itemId : number, itemType : Enum.InfoType) : {[string] : any}?
+	return SanitizeClientProductInfo(ServerClientInfoHandler:GetProductInfoForPlayer(player, itemId, itemType))
+end
+
 local function GetProductInfo(player : Player | number, itemId : number, itemType : Enum.InfoType) : {FromClient : boolean, Data : {[string] : any}}?
 	-- Check if we've already retrieved product info
 	if not ProductInfoCacheMap[itemType] then
@@ -61,8 +92,9 @@ local function GetProductInfo(player : Player | number, itemId : number, itemTyp
 			itemInfo = Utilities.getProductInfo(itemId, itemType)
 		end
 
-		if not itemInfo then
-			itemInfo = ServerClientInfoHandler:GetProductInfoForPlayer(player, itemId, itemType)
+		-- Only a player still in the server has a client to ask
+		if not itemInfo and Utilities.resolvePlayerObject(player) then
+			itemInfo = GetClientProductInfo(player, itemId, itemType)
 			fromClient = true
 		end
 		
@@ -96,23 +128,27 @@ end
 function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, fromReceipt : boolean, itemId : number, itemType : Enum.InfoType, metadataOverride : {[string] : any}?)
 	local player = Utilities.resolvePlayerObject(player)
 
+	-- Nothing to report without product info
 	local itemInfo = GetProductInfo(player, itemId, itemType)
-	if not itemInfo and itemType ~= Enum.InfoType.Subscription then
+	if not itemInfo then
 		return
 	end
 
-	--NOTE: In the event the client holds onto the request forever, we dont want to block the server.
-	local clientData = if itemInfo.FromClient then itemInfo.Data else ServerClientInfoHandler:GetProductInfoForPlayer(player, itemId, itemType)
+	-- Nil when no client answers in time (no client SDK, request failed, or a receipt processed after
+	-- the player left); the base price is used then.
+	local clientData = if itemInfo.FromClient then itemInfo.Data
+		elseif player then GetClientProductInfo(player, itemId, itemType)
+		else nil
 
-	-- Sanity check the client price
-	if clientData.PriceInRobux and itemInfo.Data.PriceInRobux > 0 then
-		-- Price cant be greater than the base price.
-		if clientData.PriceInRobux > itemInfo.Data.PriceInRobux then
+	-- Sanity check the client price: it can't be greater than the base price
+	local basePrice = itemInfo.Data.PriceInRobux
+	if clientData and clientData.PriceInRobux and basePrice and basePrice > 0 then
+		if clientData.PriceInRobux > basePrice then
 			clientData = nil
 		end
 	end
 
-	-- Don't send redundant information over the wire
+	-- Only the product fields the marker needs
 	local args = {
 		["fromReceipt"] = fromReceipt,
 		["type"] = ENUM_TO_TYPE[itemType] or "unknown",
@@ -138,7 +174,7 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, fromRecei
 end
 
 function PurchaseAnalytics:DevProductPurchased(fromReceipt : boolean, playerId : number, itemId : number, position : Vector3? )
-	-- If we've validated that the dev is using the method with receipts, we don't need to rely on our internal method
+	-- Once receipts are seen, the prompt-based path is ignored
 	if UsingProductReceipts and fromReceipt == false then
 		return
 	end
@@ -177,16 +213,33 @@ end
 
 --= Initializers =--
 function PurchaseAnalytics:Init()
+	-- Exploits can fire the prompt-finished events without a purchase, so a pass or asset is only
+	-- recorded once the player owns it. Subscriptions are checked the same way.
+
 	-- Purchase records handler for gamepasses
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamePassId, wasPurchased)
-		if wasPurchased then
+		if not wasPurchased then
+			return
+		end
+
+		local success, ownsPass = pcall(function()
+			return MarketplaceService:UserOwnsGamePassAsync(player.UserId, gamePassId)
+		end)
+		if success and ownsPass then
 			self:UpdatePlayerSpend(player, false, gamePassId, Enum.InfoType.GamePass)
 		end
 	end)
 
 	-- Purchase records handler for assets / other
 	MarketplaceService.PromptPurchaseFinished:Connect(function(player, assetId, wasPurchased)
-		if wasPurchased then
+		if not wasPurchased then
+			return
+		end
+
+		local success, ownsAsset = pcall(function()
+			return MarketplaceService:PlayerOwnsAsset(player, assetId)
+		end)
+		if success and ownsAsset then
 			self:UpdatePlayerSpend(player, false, assetId, Enum.InfoType.Asset)
 		end
 	end)
@@ -203,7 +256,7 @@ function PurchaseAnalytics:Init()
 	end)
 
 	-- Purchase records handler for products
-	--NOTE: Disabled due to PromptProductPurchaseFinished being unreliable. Too many false positives.
+	--NOTE: Disabled, PromptProductPurchaseFinished gives too many false positives.
 	--[[MarketplaceService.PromptProductPurchaseFinished:Connect(function(playerId : number, productId : number, wasPurchased : boolean)
 		if DevProductEventDebounce[playerId] then
 			return

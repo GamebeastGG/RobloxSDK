@@ -20,8 +20,8 @@ local MarketplaceService = game:GetService("MarketplaceService")
 
 --= Dependencies =--
 
-local GetRemote = shared.GBMod("GetRemote")
-local ClientSessionPreservation = shared.GBMod("ClientSessionPreservation") ---@module ClientSessionPreservation
+local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote)
+local ClientSessionPreservation = require(script.Parent.ClientSessionPreservation) ---@module ClientSessionPreservation
 
 --= Types =--
 
@@ -58,7 +58,7 @@ function ClientInfoHandler:UpdateClientInfo(key : string, value : any)
 
         for key in REQUIRED_KEYS do
             if not CurrentClientInfoCache[key] then
-                return -- Will not send signal that client info is ready until all required keys are set
+                return -- Not sent until every required key is set
             end
         end
 

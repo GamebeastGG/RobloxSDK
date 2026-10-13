@@ -17,8 +17,8 @@ local TeleportService = game:GetService("TeleportService")
 
 --= Dependencies =--
 
-local Signal = shared.GBMod("Signal") ---@module Signal
-local GetRemote = shared.GBMod("GetRemote")
+local Signal = require(script.Parent.Parent.Parent.Shared.Modules.Signal) ---@module Signal
+local GetRemote = require(script.Parent.Parent.Parent.Shared.Modules.GetRemote)
 
 --= Types =--
 

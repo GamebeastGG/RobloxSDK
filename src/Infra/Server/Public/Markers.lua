@@ -18,8 +18,8 @@ local Players = game:GetService("Players")
 
 --= Dependencies =--
 
-local EngagementMarkers = shared.GBMod("EngagementMarkers") ---@module EngagementMarkers
-local PurchaseAnalytics = shared.GBMod("PurchaseAnalytics") ---@module PurchaseAnalytics
+local EngagementMarkers = require(script.Parent.Parent.Modules.EngagementMarkers) ---@module EngagementMarkers
+local PurchaseAnalytics = require(script.Parent.Parent.Modules.InternalMarkers.PurchaseAnalytics) ---@module PurchaseAnalytics
 
 --= Types =--
 
@@ -55,12 +55,12 @@ function Markers:SendNewPurchaseGrantedMarker(recieptInfo : {[string] : number |
 end
 
 function Markers:OnMarkersFailed(callback : (failedMarkers : { {[string] : any} } ) -> ()) : RBXScriptConnection
-    -- Implementation for handling failed markers
+    -- Fired with the valid markers from a batch that failed to send
     return EngagementMarkers.MarkersFailed:Connect(callback)
 end
 
 function Markers:RetryFailedMarkersAsync(failedMarkers : { {[string] : any} } ) : boolean
-    -- Implementation for retrying failed markers
+    -- A failed retry doesn't fire OnMarkersFailed again
 
     return EngagementMarkers:SendMarkers(failedMarkers)
 end

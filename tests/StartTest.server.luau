@@ -13,7 +13,8 @@ ClientTestRemote:GetAttributeChangedSignal("RunServerTest"):Connect(function()
     if not run then return end
 
     Tester:Run({
-        "Events"
+        "Changesets",
+        "Markers"
     })
 
     ClientTestRemote:SetAttribute("RunServerTest", false)
