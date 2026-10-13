@@ -16,8 +16,6 @@ Timer.__index = Timer
 
 --= Roblox Services =--
 
-local RunService = game:GetService("RunService")
-
 --= Dependencies =--
 
 local Signal = require(script.Parent.Signal) ---@module Signal
@@ -39,16 +37,24 @@ function Timer.new(timeSeconds : number)
     local self = setmetatable({}, Timer)
 
     self._cleaner = Cleaner.new()
-    self._startTick = tick()
     self._timedOutSignal = Signal.new()
 
     self._cleaner:Add(self._timedOutSignal)
-    self._cleaner:Add(RunService.Heartbeat:Connect(function()
-        if tick() - self._startTick >= timeSeconds then
-            self._timedOutSignal:Fire(true)
-            self:Destroy()
-        end
-    end))
+
+    -- A scheduled wake-up rather than a Heartbeat check: each pending player marker holds a timer,
+    -- and a check every frame per timer added up during join bursts
+    local thread = task.delay(timeSeconds, function()
+        self._timedOutSignal:Fire(true)
+        self:Destroy()
+    end)
+    self._cleaner:Add({
+        Destroy = function()
+            -- Not while it runs: the timer's own end destroys it from inside that thread
+            if coroutine.status(thread) == "suspended" then
+                task.cancel(thread)
+            end
+        end,
+    })
 
     return self
 end
