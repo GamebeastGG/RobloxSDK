@@ -37,6 +37,9 @@ local ConfigReadySignal = Signal.new({ copyArguments = false })
 
 --= Constants =--
 
+-- The old view of a config the client didn't have yet, matching the server's
+local EMPTY_CONFIG = table.freeze({})
+
 --= Variables =--
 
 -- Config documents keyed by stringified config id
@@ -254,7 +257,7 @@ function ClientConfigs:Init()
                 IdentifierByConfigId = payload.identifierByConfigId
 
                 -- So OnChanged and Observe subscribed before this config existed still fire
-                ConfigUpdatedSignal:Fire(configId, changes, nil)
+                ConfigUpdatedSignal:Fire(configId, changes, EMPTY_CONFIG)
             end)
             return
         end

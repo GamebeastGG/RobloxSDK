@@ -83,12 +83,6 @@ function utilities:PCallRetry(retryCount: number, callback: () -> (), _count: nu
 	end
 end
 
--- Compares concatenated array parts only, so it suits flat arrays of strings or numbers.
--- Not exact: {"ab", "c"} equals {"a", "bc"}.
-utilities.tableEqualityCheck = function(a, b)
-	return table.concat(a) == table.concat(b)
-end
-
 -- Deep equality check for two values (handles nested tables)
 function utilities.primativeDeepEqual(a: any, b: any): boolean
 	if a == b then

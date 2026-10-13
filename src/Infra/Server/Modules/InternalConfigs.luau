@@ -246,42 +246,36 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 	return configCopy
 end
 
+-- Whether `path` is `ancestor` or somewhere inside it
+local function IsPathWithin(path: {string}, ancestor: {string}): boolean
+	if #ancestor > #path then
+		return false
+	end
+	for index, segment in ancestor do
+		if not IsSameSegment(segment, path[index]) then
+			return false
+		end
+	end
+	return true
+end
+
+-- Keeps only rootmost paths: a path inside one already in the set is skipped, and a path above
+-- some replaces them
 local function addRootmostPathToSet(rootmostPathSet: {[string]: {string}?}, newPath: {string}): ()
-	if #newPath == 0 then
-		table.clear(rootmostPathSet)
+	for existingPathKey, existingPath in rootmostPathSet do
+		if IsPathWithin(newPath, existingPath) then
+			return
+		elseif IsPathWithin(existingPath, newPath) then
+			rootmostPathSet[existingPathKey] = nil
+		end
 	end
 
-	-- Build hash key from path, escaping segment delimiter in case user-defined path contains it
+	-- Segments are escaped so a "." inside one can't collide with the delimiter
 	local escapedNewPath: {string} = table.create(#newPath)
 	for _, pathSegment in newPath do
 		table.insert(escapedNewPath, (pathSegment:gsub("\\", "\\\\"):gsub("%.", "\\.")))
 	end
-	local newPathKey = table.concat(escapedNewPath, ".")
-
-	-- If already exactly in set, skip adding
-	if rootmostPathSet[newPathKey] then
-		return
-	end
-
-	-- Check if existing paths cover new path
-	for existingPathKey in rootmostPathSet do
-		if string.sub(newPathKey, 1, #existingPathKey) == existingPathKey then
-
-			-- If new one is higher-level than existing, replace it
-			if #newPathKey < #existingPathKey then
-				rootmostPathSet[existingPathKey] = nil
-				rootmostPathSet[newPathKey] = newPath
-				return
-
-			-- If existing is higher-level than new, skip adding
-			else
-				return
-			end
-		end
-	end
-
-	-- If no existing paths cover new path, add it to the set
-	rootmostPathSet[newPathKey] = newPath
+	rootmostPathSet[table.concat(escapedNewPath, ".")] = newPath
 end
 
 -- Builds a client's privacy-filtered config payload from its current views
