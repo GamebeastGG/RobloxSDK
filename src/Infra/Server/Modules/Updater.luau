@@ -389,6 +389,14 @@ function Updater:ApplyStatus(status) : boolean
 			continue
 		end
 
+		-- Fetched by alias, so it can come back as a different config if the alias moved between the
+		-- status and this fetch; applying it would store that config's content under this one's id
+		if configResp.configurationId ~= nil and tonumber(configResp.configurationId) ~= configStatus.id then
+			Utilities.GBLog("Config", configStatus.id, "fetched as", configResp.configurationId, "; retrying next poll")
+			isComplete = false
+			continue
+		end
+
 		-- Applied either way, since it is newer than what we hold, but a version other than the one
 		-- the status lists means the fetch hasn't caught up; the next poll checks again
 		if configResp.hash ~= configStatus.hash then
