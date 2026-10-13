@@ -65,6 +65,21 @@ local MAX_PROPERTIES = 100
 local MAX_CALLBACK_DURATION = 6
 
 --[[
+	A value the player's client reports, once it has (bounded by MAX_CALLBACK_DURATION).
+
+	The wait used to have no limit, and a player leaving never resumed it, so each assignment request
+	for a player without the client SDK left waiting threads behind. Nil until the client reports,
+	rather than the "unknown" default, so targeting never mistakes a missing value for a real one.
+]]
+local function GetClientReportedInfo(player: Player, key: string): any
+	ServerClientInfoHandler:WaitUntilClientInfoResolved(player, MAX_CALLBACK_DURATION)
+	if not ServerClientInfoHandler:IsClientInfoResolved(player) then
+		return nil
+	end
+	return ServerClientInfoHandler:GetClientInfo(player, key)
+end
+
+--[[
 	When experiments have filters that require player properties, these
 	callbacks are ran to retrieve and include that context in assignment
 	requests.
@@ -78,16 +93,13 @@ local MAX_CALLBACK_DURATION = 6
 ]]
 local PLAYER_PROPERTY_GETTERS: { [string]: (player: Player) -> any } = {
 	inputType = function(player)
-		ServerClientInfoHandler:WaitUntilClientInfoResolved(player)
-		return ServerClientInfoHandler:GetClientInfo(player, "inputType")
+		return GetClientReportedInfo(player, "inputType")
 	end,
 	device = function(player)
-		ServerClientInfoHandler:WaitUntilClientInfoResolved(player)
-		return ServerClientInfoHandler:GetClientInfo(player, "device")
+		return GetClientReportedInfo(player, "device")
 	end,
 	deviceSubType = function(player)
-		ServerClientInfoHandler:WaitUntilClientInfoResolved(player)
-		return ServerClientInfoHandler:GetClientInfo(player, "deviceSubType")
+		return GetClientReportedInfo(player, "deviceSubType")
 	end,
 	country = function(player)
 		return LocalizationCache:GetRegionId(player)
