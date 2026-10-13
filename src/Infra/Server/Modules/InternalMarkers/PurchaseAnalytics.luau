@@ -53,9 +53,8 @@ local function IsString(value : any, maxLength : number) : boolean
 end
 
 --[[
-	Product info a client reported, keeping only the fields the Purchase marker uses and only if
-	they're well formed; nil if nothing usable is left. The client is untrusted: its price feeds
-	revenue (for subscriptions it is the only source), and a non-numeric one errored the price check.
+	Keeps only the well-formed fields the Purchase marker uses; nil if the price is malformed.
+	The client is untrusted, and its price feeds revenue (the only source for subscriptions).
 ]]
 local function SanitizeClientProductInfo(data : any) : {[string] : any}?
 	if type(data) ~= "table" then
@@ -129,16 +128,14 @@ end
 function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, fromReceipt : boolean, itemId : number, itemType : Enum.InfoType, metadataOverride : {[string] : any}?)
 	local player = Utilities.resolvePlayerObject(player)
 
-	-- Nothing to report without product info. Subscriptions used to be let through here and then
-	-- errored indexing the missing info, so the marker was lost anyway.
+	-- Nothing to report without product info
 	local itemInfo = GetProductInfo(player, itemId, itemType)
 	if not itemInfo then
 		return
 	end
 
-	--NOTE: In the event the client holds onto the request forever, we dont want to block the server.
-	-- Nil when the client can't answer (no client SDK, or the request failed); the base price is used then.
-	-- A receipt can be processed after the player has left, leaving no client to ask.
+	-- Nil when no client answers in time (no client SDK, request failed, or a receipt processed after
+	-- the player left); the base price is used then.
 	local clientData = if itemInfo.FromClient then itemInfo.Data
 		elseif player then GetClientProductInfo(player, itemId, itemType)
 		else nil
@@ -151,7 +148,7 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, fromRecei
 		end
 	end
 
-	-- Don't send redundant information over the wire
+	-- Only the product fields the marker needs
 	local args = {
 		["fromReceipt"] = fromReceipt,
 		["type"] = ENUM_TO_TYPE[itemType] or "unknown",
@@ -177,7 +174,7 @@ function PurchaseAnalytics:UpdatePlayerSpend(player : Player | number, fromRecei
 end
 
 function PurchaseAnalytics:DevProductPurchased(fromReceipt : boolean, playerId : number, itemId : number, position : Vector3? )
-	-- If we've validated that the dev is using the method with receipts, we don't need to rely on our internal method
+	-- Once receipts are seen, the prompt-based path is ignored
 	if UsingProductReceipts and fromReceipt == false then
 		return
 	end
@@ -216,9 +213,8 @@ end
 
 --= Initializers =--
 function PurchaseAnalytics:Init()
-	-- The prompt-finished events aren't proof of a purchase on their own (they have been fired by
-	-- exploits without one), so a pass or asset is only recorded once the player is seen to own it.
-	-- Subscriptions are checked the same way below.
+	-- Exploits can fire the prompt-finished events without a purchase, so a pass or asset is only
+	-- recorded once the player owns it. Subscriptions are checked the same way.
 
 	-- Purchase records handler for gamepasses
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamePassId, wasPurchased)
@@ -260,7 +256,7 @@ function PurchaseAnalytics:Init()
 	end)
 
 	-- Purchase records handler for products
-	--NOTE: Disabled due to PromptProductPurchaseFinished being unreliable. Too many false positives.
+	--NOTE: Disabled, PromptProductPurchaseFinished gives too many false positives.
 	--[[MarketplaceService.PromptProductPurchaseFinished:Connect(function(playerId : number, productId : number, wasPurchased : boolean)
 		if DevProductEventDebounce[playerId] then
 			return

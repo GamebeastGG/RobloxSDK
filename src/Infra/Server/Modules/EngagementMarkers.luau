@@ -60,8 +60,8 @@ local DROP_MARKER_CODES = {
 
 local WaitingPlayerMarkers = {}
 local MarkerQueue = {}
--- Map of unique session IDs for users for player-associated markers
-local SessionIds = ServerGate:GetCache() -- Use ServerGate cache to automatically clear on player leave
+-- Session IDs for player markers
+local SessionIds = ServerGate:GetCache() -- Cleared on player leave
 local LastEventReportTime = 0
 local ClientInfoWarned = false
 
@@ -107,8 +107,7 @@ end
 local function AddMarker(marker)
 	table.insert(MarkerQueue, marker)
 	
-	-- If marker queue size limit reached then send batch. Spawned because markers are added from
-	-- threads that must not yield, including the shutdown flush.
+	-- Spawned since markers are added from threads that must not yield, including the shutdown flush
 	if #MarkerQueue >= MAX_EVENT_QUEUE_SIZE then
 		task.spawn(function()
 			EngagementMarkers:SendMarkers()
@@ -137,8 +136,7 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 		
 		local success, responseBody = GBRequests:GBRequestAsync("v1/markers", data)
 
-		-- A successful batch can still carry rejections: valid markers were ingested and the
-		-- backend reports the ones it dropped and why (invalid shape, subscription limits).
+		-- A successful batch can still have some markers rejected (invalid shape, subscription limits)
 		if success and responseBody and (responseBody.rejectedMarkersCount or 0) > 0 then
 			local reasons = {}
 			for index, rejected in responseBody.rejectedMarkers or {} do
@@ -153,9 +151,8 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 		end
 
 		if not success then
-			-- The SDK doesn't resend a failed batch itself: it hands the valid markers to the developer
-			-- through MarkersFailed (Markers:OnMarkersFailed) to retry with RetryFailedMarkersAsync.
-			-- Resending here as well would duplicate them, since the backend doesn't de-duplicate.
+			-- Not resent here, the valid markers go to the developer through MarkersFailed to retry.
+			-- Resending here too would duplicate them, since the backend doesn't de-duplicate.
 			local toRetry = {}
 			local invalidMarkerCount = 0
 			for _, marker in data.markers do
@@ -178,7 +175,7 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 			end
 
 			if responseBody and responseBody.errorCode and DROP_MARKER_CODES[responseBody.errorCode] then
-				return false, responseBody -- Drop the markers if they were all rejected.
+				return false, responseBody -- Rejected for a known reason, skip the generic warning
 			end
 
 			Utilities.GBWarn("Failed to send engagement markers to Gamebeast.")
@@ -189,7 +186,7 @@ function EngagementMarkers:SendMarkers(queue : {any}?) : (boolean, {[string] : a
 	return true
 end
 
--- Core function, should be used internally by SDK rather than fireMarker
+-- Shared by FireMarker and SDKMarker
 -- function EngagementMarkers:CreateMarker(source, markerType, player, position, value)
 function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", markerType : string, value : any | {[string] : any}, metaData : {[string] : any})
 	metaData = metaData or {}
@@ -232,10 +229,10 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 	end
 
 	if value ~= nil and valueType ~= "table" then
-		value = { value = value } -- Wrap non-table values in a table
+		value = { value = value }
 	end
 	
-	-- Interface allows for player instance or userId. We already validated args types, so just handle accordingly.
+	-- Player may be an instance or a userId
 	local player = Utilities.resolvePlayerObject(player)
 	
 	-- Marker fields
@@ -288,7 +285,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			entry.properties.deviceSubType = ServerClientInfoHandler:GetClientInfo(player, "deviceSubType")
 			entry.properties.inputType = ServerClientInfoHandler:GetClientInfo(player, "inputType")
 
-			-- Attempt to resolve session ID from client info so we preserve it across game sessions.
+			-- Prefer the client's session ID, which carries over teleports within the game
 			local sessionId = ServerClientInfoHandler:GetClientInfo(player, "sessionId")
 			if sessionId and sessionId ~= "" then
 				entry.sessionId = sessionId
@@ -301,7 +298,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 
 			AddMarker(entry)
 
-			-- Remove from waiting list if it exists
+			-- Left in place on shutdown, which is iterating this list
 			if not shutdown then
 				local index = table.find(WaitingPlayerMarkers, pendingMarkerData)
 				if index then
@@ -314,7 +311,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 
 		-- Task manager
 
-		-- Will only add tasks if they arent already finished and the connection is still active.
+		-- A nil or disconnected connection means the callback already ran
 		local function addTask(taskName : string, connection : RBXScriptConnection?)
 			if not pendingMarkerData.tasks[taskName] and connection ~= nil and connection.Connected == true then
 				pendingMarkerData.activeTasks += 1
@@ -354,7 +351,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			end
 		end
 
-		-- Stop wating after some time if tasks are not resolved
+		-- Stop waiting on unresolved tasks after a timeout
 		local dataFetchTimer = Timer.new(CLIENT_DATA_TIMEOUT)
 		pendingMarkerData.pendingCleaner:Add(dataFetchTimer)
 		pendingMarkerData.pendingCleaner:Add(dataFetchTimer:OnEnd(function()
@@ -367,17 +364,15 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 				completeTask("clientInfo")
 			end
 
-			-- Send the marker without whatever is still missing rather than hold it until shutdown:
-			-- an engine lookup that never came back, launch data, or experiment assignment while the
-			-- assignment endpoint is down. Held markers were lost on a crash and rejected as stale
-			-- once a server ran past a day. Without assignments the backend attributes the marker to
-			-- no experiment, which beats not having it at all.
+			-- Send the marker without whatever is still missing rather than hold it. Markers held too long
+			-- are lost on a crash or rejected as stale; without assignments the marker just counts toward
+			-- no experiment.
 			completeTask("localization")
 			completeTask("launchData")
 			completeTask("experimentAssignments")
 		end))
 
-		-- Ensure marker gets fired with device info on timeout or bind to close
+		-- Device and input type come from the client
 		addTask("clientInfo", ServerClientInfoHandler:OnClientInfoResolved(player, function()
 			completeTask("clientInfo")
 		end))
@@ -403,8 +398,8 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 			completeTask("localization")
 		end))
 
-		-- Experiment attribution is stamped by the backend at ingestion from the player's
-		-- persisted assignments, so hold the marker until those assignments are resolved.
+		-- The backend attributes markers to experiments from the player's stored assignments, so wait
+		-- for those to resolve
 		addTask("experimentAssignments", Experiments:OnAssignmentsResolvedForPlayer(player, function()
 			completeTask("experimentAssignments")
 		end))
@@ -417,7 +412,7 @@ function EngagementMarkers:_createMarker(source : "server" | "client" | "sdk", m
 	end)
 end
 
--- Fire an engagement marker. Used by devs via API module, wraps createMarker to declare source.
+-- Used by the public Markers API
 -- Usage: EngagementMarkers:FireMarker("LevelUp", {playerLevel = player:GetAttribute("Level")}, {player = player, position = player.Character.PrimaryPart.Position})
 function EngagementMarkers:FireMarker(...)
 	self:_createMarker("server", ...)
@@ -430,18 +425,16 @@ end
 
 --= Initializers =--
 function EngagementMarkers:Init()
-	-- Check if time limit has elapsed and send current data, if any
+	-- Flush the queue every markerFlushRate seconds
 	task.spawn(function()
 		while true do
 			local markerFlushRate = DataCache:Get("Settings").markerFlushRate
 			task.wait(math.min(QUEUE_CHECK_TIME, markerFlushRate))
 
-			-- Check if we need to send queued events to GB
 			local lastReportElapsed = tick() - LastEventReportTime
 
 			if lastReportElapsed >= markerFlushRate then
-				-- Protected so one bad batch can't end this loop; before, it left markers going out
-				-- only when the queue filled to its limit, for the rest of the server's life
+				-- Protected so one bad batch can't end this loop
 				local didSend, sendError = pcall(self.SendMarkers, self)
 				if not didSend then
 					Utilities.GBWarn("Failed to send engagement markers:", sendError)

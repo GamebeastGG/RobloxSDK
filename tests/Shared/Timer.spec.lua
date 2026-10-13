@@ -1,6 +1,5 @@
 --[[
-    Unit tests for the SDK's Timer, which now schedules its end with task.delay instead of checking
-    the clock every frame. No dashboard interaction required.
+    Unit tests for the SDK's Timer. No dashboard interaction required.
 ]]
 
 return function()

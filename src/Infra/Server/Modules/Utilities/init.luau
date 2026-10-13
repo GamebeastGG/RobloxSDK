@@ -9,7 +9,7 @@ local DataCache = require(script.Parent.Parent.Parent.Shared.Modules.DataCache)
 
 local utilities = {}
 
--- Central function for warning messages across SDK. Indicates Gamebeast as warning source and allows for output settings.
+-- SDK warnings, prefixed and gated by the warning settings
 utilities.GBWarn = function(...)
 	if DataCache:Get("Settings").sdkWarningsEnabled then
 		warn("GamebeastSDK:", ...)
@@ -33,7 +33,7 @@ utilities.resolvePlayerObject = function(playerQuery: Player | number)
 	end
 end
 
--- pcall wrapper function with retry support used extensively in SDK.
+-- pcall with retries, warning on the last failure. A nil maxRetries retries forever.
 utilities.promiseReturn = function(maxRetries, callback, retries): (any?, boolean)
 	if maxRetries and not retries then
 		retries = 0
@@ -83,8 +83,8 @@ function utilities:PCallRetry(retryCount: number, callback: () -> (), _count: nu
 	end
 end
 
--- Check contents of two tables are the same without recursive iteration
--- Works only if we want to check key-value equivalence, and not type, table memory reference, etc. Works for SDK purposes *today*.
+-- Compares concatenated array parts only, so it suits flat arrays of strings or numbers.
+-- Not exact: {"ab", "c"} equals {"a", "bc"}.
 utilities.tableEqualityCheck = function(a, b)
 	return table.concat(a) == table.concat(b)
 end
@@ -130,7 +130,7 @@ function utilities.primativeDeepEqual(a: any, b: any): boolean
 	return true
 end
 
--- Format time in seconds to specified format
+-- Formats seconds as HH:MM:SS, or MM:SS with onlyMinutes
 utilities.formatTime = function(timeRemaining, onlyMinutes)
 	local hours = math.floor(timeRemaining / 60 / 60)
 	local minutes = math.floor((timeRemaining / 60) - (hours * 60))
@@ -153,7 +153,7 @@ utilities.formatTime = function(timeRemaining, onlyMinutes)
 	return onlyMinutes and minutes .. ":" .. seconds or hours .. ":" .. minutes .. ":" .. seconds
 end
 
--- Convert seconds to time remaining in specified format
+-- Formats seconds as "1d 2h 3m 4s"
 utilities.convertSecstoDay = function(timeRemaining)
 	local days = timeRemaining / (24 * 3600)
 
@@ -186,7 +186,7 @@ utilities.getProductInfo = function(id, infoType)
 	end)
 end
 
--- Recursive deep copy of a given table
+-- Deep copy. readOnly freezes the nested tables, not the returned one.
 utilities.recursiveCopy = function(tab, readOnly)
 	local tableCopy = {}
 
@@ -205,12 +205,12 @@ utilities.recursiveCopy = function(tab, readOnly)
 	return tableCopy
 end
 
--- Round num to nearest specified increment. Roblox changes may have made less numerically stable, resulting in some odd floating point errors in limited instances
+-- Rounds num to the nearest increment. Can leave small floating point errors.
 utilities.roundNum = function(num, nearest)
 	return math.floor(0.5 + (num / nearest)) / (1 / nearest)
 end
 
---- Returns an array of all values found in the given table, regardless of key type.
+--- Returns the table's values as an array, whatever the key type.
 function utilities.getTableValues<K, V>(t: { [K]: V }): { V }
 	local values: { V } = {}
 	for _, value in t do
@@ -219,8 +219,7 @@ function utilities.getTableValues<K, V>(t: { [K]: V }): { V }
 	return values
 end
 
---- Returns the value found when traversing `root` upon reaching the given `path`.
---- A segment that names no key is tried as an array index too, since privacy paths are strings.
+--- Returns the value at `path` in `root`. Segments are strings, so one that names no key is also tried as an array index.
 function utilities.getValueAtPath(root: any, path: { string }): any
 	local value = root
 	for _, pathSegment in path do
@@ -239,12 +238,12 @@ end
 
 local serverId = if runService:IsStudio() then `studio:{httpService:GenerateGUID(false):lower()}` else game.JobId
 
---- Returns the server's ID in live games, or a generated one for each Studio test session (prefixed with `studio:`).
+--- The JobId in live games, or a generated `studio:` id per Studio session.
 function utilities.getServerId(): string
 	return serverId
 end
 
--- Wrapper for player added that ensures players that joined before the signal was attached get passed through the callback.
+-- PlayerAdded that also runs for players already in the game
 function utilities:OnPlayerAdded(callback: (player: Player) -> ())
 	for _, player in pairs(game.Players:GetPlayers()) do
 		task.spawn(callback, player)

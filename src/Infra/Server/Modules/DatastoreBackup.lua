@@ -5,7 +5,7 @@
     DatastoreBackup.lua
     
     Description:
-        No description provided.
+        pcall-wrapped DataStore access for the config backup.
     
 --]]
 

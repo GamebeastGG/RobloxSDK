@@ -50,9 +50,8 @@ export type ConfigEntry = {
 local GetConfigRemoteFunc = GetRemote("Function", "Get")
 local ConfigChangedRemote = GetRemote("Event", "ConfigChanged")
 local ConfigIdentitiesChangedRemote = GetRemote("Event", "ConfigIdentitiesChanged")
--- Neither signal copies its arguments per listener: a game can hold hundreds of config subscriptions,
--- and each used to receive its own deep copy of the configuration on every fire. Listeners only read
--- them, and the old configs a change carries are frozen before they are shared.
+-- Arguments aren't copied per listener, since a game can hold hundreds of subscriptions. Listeners
+-- only read them, and the old configs a change carries are frozen.
 local ConfigReadySignal = Signal.new({ copyArguments = false })
 local BatchConfigUpdatedSignal = Signal.new({ copyArguments = false })
 
@@ -64,10 +63,9 @@ local EMPTY_VIEW = table.freeze({})
 --= Variables =--
 
 --[[
-	Clients' config payloads, kept until a view or identifier changes. Building one copies and
-	privacy-filters every config; built per fetch, every join paid that, and so did every call from a
-	client invoking the remote in a loop. Players who share the server's views share one payload;
-	players with views of their own (per-player experiments) get their own.
+	Cached client payloads, stale once ClientPayloadVersion moves on. Building one copies and
+	privacy-filters every config. Players on the server's views share one payload, players with
+	views of their own (per-player experiments) get their own.
 ]]
 local ClientPayloadVersion = 0
 local SharedClientPayload : { version : number, payload : any }? = nil
@@ -105,10 +103,8 @@ local function BuildIdentifierByConfigId() : { [string] : string }
 end
 
 --[[
-	Sends clients the current identifier maps. Clients otherwise only learned them on their first
-	fetch, so a renamed config, a new alias, a deleted config or a new empty one never reached a
-	player already in game: Get on the new name returned nil while the server resolved it.
-	Deferred so a status poll that touches several configs sends one update.
+	Sends clients the current identifier maps, so renames, new aliases and added or deleted configs
+	reach players already in game. Deferred so a poll touching several configs sends one update.
 ]]
 local function QueueIdentityBroadcast()
 	if IdentityBroadcastQueued then
@@ -147,16 +143,13 @@ local function RebuildIdentifierMap()
 	QueueIdentityBroadcast()
 end
 
---[[
-	Whether two path segments name the same key. Privacy paths arrive from the backend as strings,
-	while a change through an array carries numeric indexes, so `"1" ~= 1` kept a private array
-	element from ever matching its privacy path.
-]]
+-- Whether two path segments name the same key. Privacy paths are strings while changes through an
+-- array carry numeric indexes, so "1" has to match 1.
 local function IsSameSegment(a : any, b : any) : boolean
 	return a == b or tostring(a) == tostring(b)
 end
 
--- The key in `container` a privacy path segment refers to: as given, or as an array index
+-- The key in `container` a path segment refers to: as given, or as an array index
 local function ResolveSegment(container : { [any] : any }, segment : any) : any
 	if container[segment] == nil then
 		local index = tonumber(segment)
@@ -174,7 +167,7 @@ local function IsPathPrivate(path : {string}, privatePaths: {{string}}) : boolea
 		end
 
 		local match = true
-		for index, pathSegment in ipairs(path) do -- a, d
+		for index, pathSegment in ipairs(path) do
 			if privacyPath[index] == nil then
 				return true
 			elseif not IsSameSegment(pathSegment, privacyPath[index]) then
@@ -196,11 +189,11 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 		then Utilities.recursiveCopy(config)
 		else config
 
-	-- Determine if the path is a match for any privacy paths
+	-- Privacy paths relative to `path`. One at or above `path` comes out empty, hiding the whole value.
 	local targetPaths = {}
-	for _, privacyPath in privacyConfig do -- a, d, e
+	for _, privacyPath in privacyConfig do
 		local match = true
-		for index, pathSegment in ipairs(path) do -- a, d
+		for index, pathSegment in ipairs(path) do
 			if privacyPath[index] == nil then
 				break
 			elseif not IsSameSegment(pathSegment, privacyPath[index]) then
@@ -228,10 +221,7 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 			break
 		end
 
-		-- Nothing private can be left inside a value that is not a table. A change that removes a
-		-- key sitting above a privacy path arrives carrying no value at all, so there is nothing to
-		-- scrub; descending into it raised "attempt to index nil" and, with no pcall around the poll
-		-- loop, took status polling down with it for the rest of the server's life.
+		-- Nothing private can be inside a non-table, e.g. a removal above a privacy path carries no value
 		if type(configCopy) ~= "table" then
 			continue
 		end
@@ -244,8 +234,7 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 			else
 				target = target[ResolveSegment(target, pathSegment)]
 
-				-- Covers a scalar as well as a missing key: either way the privacy path runs deeper
-				-- than the document does, so there is nothing there to remove
+				-- Scalar or missing key: the privacy path runs deeper than the document
 				if type(target) ~= "table" then
 					Utilities.GBWarn("Privacy path ".. table.concat(targetPath, ".").. " does not exist in config.")
 					break
@@ -303,9 +292,8 @@ local function BuildClientPayload(player : Player)
 		configs[tostring(configId)] = FilterConfigForClient({}, view, entry.privacy)
 	end
 
-	-- identifierByConfigId keys each config once for consumers. ConfigIdByIdentifier holds every
-	-- spelling (id, name and alias all resolve), so a client keying its own payload off it listed
-	-- the same document up to three times where the server listed it once.
+	-- idByIdentifier holds every spelling (id, name, alias) for resolving. identifierByConfigId keys
+	-- each config once, for listing.
 	return {
 		idByIdentifier = table.clone(ConfigIdByIdentifier),
 		identifierByConfigId = BuildIdentifierByConfigId(),
@@ -356,14 +344,9 @@ function InternalConfigs:OnReady(callback : (newConfigs : any) -> ()) : RBXScrip
 end
 
 --[[
-	Marks the config store ready and releases everything waiting on it, once. The composer calls
-	this after applying every configuration from a bootstrap payload.
-
-	Readiness is deliberately not set per config. ApplyConfigs runs once per configuration, so
-	flipping the flag there released consumers, and fired every OnReady callback, as soon as the
-	first one was applied: Configs:Get on any later configuration then read a nil view. An app with
-	no configurations at all never became ready under that rule either, which the v2 backend treats
-	as a legitimate state.
+	Marks the store ready, once. Called after every config in a bootstrap payload is applied rather
+	than per config, so Get never reads a view that isn't applied yet, and an app with no configs
+	still becomes ready.
 ]]
 function InternalConfigs:SetReady()
 	if ConfigsReady then
@@ -429,9 +412,7 @@ function InternalConfigs:OnChanged(player: Player?, targetConfig : string | {str
 		end
 	end)
 
-	-- A player's subscriptions end when they leave. Left to the developer, an OnChangedForPlayer or
-	-- ObserveForPlayer that was never disconnected kept the Player, and a check on every config change,
-	-- for the rest of the server's life.
+	-- Disconnected when the player leaves, so a forgotten OnChangedForPlayer can't keep the Player alive.
 	if player then
 		local subscriptions = SubscriptionsByPlayer[player]
 		if not subscriptions then
@@ -489,9 +470,8 @@ function InternalConfigs:_checkConfigChanged(oldConfig, newConfig) : { {path : {
 	return changedBatch
 end
 
--- Registers or updates a configuration's base document from a v2 payload.
--- Does not diff or replicate; evaluated views are composed and applied separately.
--- Returns the previous privacy paths when updating, for privacy transition diffing.
+-- Registers or updates a config's base document. Doesn't diff or replicate; views are composed and
+-- applied separately. Returns the previous privacy paths when updating.
 function InternalConfigs:SetBaseConfig(configData : {[string] : any}) : { { string } }?
 	local existing = ActiveConfigs[configData.id]
 	local oldPrivacy = existing and existing.privacy or nil
@@ -528,8 +508,8 @@ function InternalConfigs:UpdateConfigIdentity(configId : number, name : string?,
 	end
 end
 
--- Removes a configuration that no longer exists on the backend.
--- Applies empty views first so subscribers and clients observe the removal.
+-- Removes a config deleted on the backend. Applies empty views first so subscribers and clients
+-- see the removal.
 function InternalConfigs:RemoveConfig(configId : number)
 	local entry = ActiveConfigs[configId]
 	if not entry then
@@ -591,9 +571,7 @@ function InternalConfigs:ApplyConfigs(player: Player?, configId : number, newVie
 		return
 	end
 
-	-- Used as is rather than copied: views are frozen below when applied and only ever replaced
-	-- whole, so the old one can't change underneath. Copying it cost a deep copy per apply, for
-	-- every player with their own view on every recompose.
+	-- Not copied: views are frozen when applied and only ever replaced whole.
 	local oldConfigs = player
 		and entry.viewByPlayer[player]
 		or entry.serverView
@@ -632,7 +610,7 @@ function InternalConfigs:ApplyConfigs(player: Player?, configId : number, newVie
 		local changedBatch = InternalConfigs:_checkConfigChanged(oldConfigs, newView)
 
 		if #changedBatch > 0 then
-			-- Shared by every listener rather than copied for each; it is a frozen view
+			-- Not copied per listener: oldConfigs is a frozen view
 			BatchConfigUpdatedSignal:Fire(player, configId, changedBatch, oldConfigs)
 		end
 
@@ -733,11 +711,9 @@ function InternalConfigs:Get(player: Player?, path : string | { string }, config
 		return nil
 	end
 
-	-- Overrides are config-local documents (e.g. old configs in OnChanged), so the
-	-- identifier segment is skipped rather than resolved.
-	-- Both walks stop at a value that isn't a table: a path that runs through a number (say, after a
-	-- dashboard edit turned a table into one) used to error in the developer's callback. A segment
-	-- like "2" also reaches an array element, since paths are strings.
+	-- Overrides are config-local documents (e.g. old configs in OnChanged), so the identifier
+	-- segment is skipped. Both walks stop at non-table values. A segment like "2" also indexes
+	-- arrays, since paths are strings.
 	if configsOverride then
 		local value = configsOverride
 		for index = 2, #path do

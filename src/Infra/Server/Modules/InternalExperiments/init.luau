@@ -7,14 +7,10 @@
 
 	Description:
 		Resolves experiment assignments for players and the server through the
-		v2 bulk assignment endpoint, and exposes assignment state to the rest
-		of the SDK.
+		v2 bulk assignment endpoint.
 
-		Experiment structure (metadata + group changesets) is owned by the
-		ExperimentCatalog submodule; evaluation context (standard Roblox
-		properties plus developer-defined properties) is owned by the
-		AssignmentContext submodule. The catalog is reconciled from
-		bootstrap/status payloads by the Updater via UpdateCatalog.
+		ExperimentCatalog owns experiment metadata and changesets, AssignmentContext
+		owns the evaluation context. The Updater feeds the catalog via UpdateCatalog.
 
 --]]
 
@@ -58,9 +54,8 @@ type AssignmentState = {
 	playerLeaveListener: RBXScriptConnection,
 	deferredBulkAssignmentThread: thread?,
 	--[[
-		Id of the latest request sent for each player. A response is only applied for the players
-		it is still the latest request for: two requests for one player can be in flight at once
-		(a join and a property change, say), and the older one landing last must not undo the newer.
+		Latest request id per player. A response only applies to players it is still the latest
+		for, so an older request landing last can't undo a newer one.
 	]]
 	latestRequestIdByPlayerId: { [number]: number },
 	lastRequestId: number,
@@ -81,10 +76,8 @@ local BULK_ASSIGNMENT_SECONDS_TO_DEFER = 1
 local SERVER_ASSIGNMENT_RETRY_DELAY = 10
 
 --[[
-	How long to wait before retrying a failed bulk assignment request. The ordinary defer is a
-	second, which is right for batching up joins but turns into one request per second per server
-	for as long as the backend is unhealthy, so a failure backs off to the same delay the
-	server-unit path uses.
+	How long to wait before retrying a failed bulk assignment request. Longer than the batching
+	defer so an unhealthy backend isn't hit every second.
 ]]
 local USER_ASSIGNMENT_RETRY_DELAY = 10
 
@@ -94,8 +87,8 @@ local USER_ASSIGNMENT_RETRY_DELAY = 10
 local MAX_BULK_ASSIGNMENT_UNITS = 250
 
 --[[
-	How often the assignment refresh loop re-derives how long it should be waiting, so a lowered
-	assignmentRefreshRate is picked up without sitting out a whole long interval first.
+	How often the refresh loop rechecks assignmentRefreshRate, so a lowered rate applies without
+	waiting out the old interval.
 ]]
 local ASSIGNMENT_REFRESH_RECHECK_INTERVAL = 5
 
@@ -122,8 +115,7 @@ local currentAssignmentState: AssignmentState? = nil
 local resolvedPlayerSet: { [Player]: true } = {}
 
 --[[
-	Fired with a player every time a bulk assignment response for them is processed,
-	regardless of whether their assignments changed.
+	Fired for a player on every processed bulk response, changed or not.
 ]]
 local playerAssignmentsResolvedSignal = Signal.new()
 
@@ -184,12 +176,9 @@ local function queueAssignment(players: { Player }, deferSeconds: number?)
 end
 
 --[[
-	Requests a player's assignment again as soon as their client reports in.
-
-	Used when a request had to go out before the client did, so it was sent without the
-	client-reported properties targeting needs (device, input type). Without this, a player on a
-	slow-loading device misses a targeted experiment until the next assignment refresh, and then
-	switches into it partway through their session.
+	Requests a player's assignment again once their client reports in. Used when a request went
+	out without the client-reported properties targeting needs (device, input type), so a slow
+	client doesn't miss a targeted experiment until the next refresh.
 ]]
 local function requeueOnClientInfo(assignmentState: AssignmentState, player: Player)
 	if assignmentState.playersAwaitingClientInfo[player] then
@@ -199,7 +188,7 @@ local function requeueOnClientInfo(assignmentState: AssignmentState, player: Pla
 
 	Utilities.GBLog(`Client info for player {player.UserId} has not arrived yet; requesting their assignment again once it does`)
 
-	-- Never fires if the player leaves first; the leave listener drops them from the awaiting set
+	-- Never fires if the player leaves first, the leave listener drops them from the awaiting set
 	ServerClientInfoHandler:OnClientInfoResolved(player, function()
 		if currentAssignmentState ~= assignmentState then
 			return
@@ -277,8 +266,7 @@ function executeUserAssignmentRequest()
 			return
 		end
 
-		-- A 200 without a usable body is treated as a failure: indexing it errored after these players
-		-- had already left the queue, so nothing retried them until the next refresh
+		-- A 200 without a usable body counts as a failure, so these players get requeued
 		if didSucceed and (type(response) ~= "table" or type(response.assignments) ~= "table") then
 			didSucceed = false
 		end
@@ -311,7 +299,7 @@ function executeUserAssignmentRequest()
 				continue
 			end
 
-			-- Superseded by a request sent after this one, which applies the player's assignments itself
+			-- Superseded by a newer request, which applies the player's assignments itself
 			if assignmentState.latestRequestIdByPlayerId[playerId] ~= requestId then
 				continue
 			end
@@ -338,8 +326,8 @@ end
 	@canyield
 ]]
 local function executeServerAssignmentRequest()
-	-- The refresh loop, property changes and catalog updates each start one of these, so two can be
-	-- in flight; only the latest may apply, or a slow older response would undo a newer one
+	-- Several callers start these, so two can be in flight. Only the latest applies, so a slow
+	-- older response can't undo a newer one
 	lastServerRequestId += 1
 	local requestId = lastServerRequestId
 
@@ -363,7 +351,7 @@ local function executeServerAssignmentRequest()
 		return
 	end
 
-	-- A 200 without a usable body is treated as a failure rather than erroring below
+	-- A 200 without a usable body counts as a failure
 	if didSucceed and (type(response) ~= "table" or type(response.assignments) ~= "table") then
 		didSucceed = false
 	end
@@ -396,16 +384,13 @@ local function executeServerAssignmentRequest()
 end
 
 --[[
-	Re-requests the assignments of every player in the server, and of the server itself, every
-	assignmentRefreshRate seconds.
+	Re-requests assignments for every player and the server every assignmentRefreshRate seconds.
 
-	This is the only way an assignment changed on the dashboard (a manual reassignment, an unenroll)
-	reaches a live server: the status snapshot moves when an experiment's definition does, not when
-	one unit's assignment does, so without it the change waits for the player to rejoin. Repeating
-	the request is harmless, since an unchanged assignment resolves to the same group and the backend
-	records its exposure once per assignment version.
+	This is how per-unit dashboard changes (manual reassignment, unenroll) reach a live server, since
+	the status snapshot only tracks experiment definitions. Repeats are harmless, the backend records
+	exposure once per assignment version.
 
-	Started from the first catalog update rather than Init, so the settings are known to be set.
+	Started from the first catalog update rather than Init, so settings are already loaded.
 ]]
 local function startAssignmentRefresh()
 	if assignmentRefreshStarted then
@@ -493,20 +478,17 @@ local function disableAssignment()
 
 	currentAssignmentState = nil
 	table.clear(resolvedPlayerSet)
-	-- No user experiments are running, so these records mean nothing now. Left in place they pin a
-	-- Player for every player who was in the server when assignment stopped, and the leave
-	-- listener that would have cleared them has just been disconnected.
+	-- The leave listener that clears these is disconnected above, so clear them here or they pin
+	-- every Player in the server
 	table.clear(Experiments.AssignmentsByPlayer)
 
 	Utilities.GBLog("Stopped requesting experiment assignment")
 end
 
 --[[
-	Re-resolves assignments after developer-defined properties changed, so
-	targeting filters see the new context. Debounced to coalesce bursts of updates.
-
-	Player properties only affect that player. Server properties travel as shared
-	context for every unit, so they refresh the server and all players.
+	Re-resolves assignments after developer-defined properties changed. Debounced to
+	coalesce bursts. Server properties travel as shared context for every unit, so they
+	refresh the server and all players.
 ]]
 local function scheduleContextRefresh(player: Player?)
 	if player then
@@ -571,15 +553,10 @@ function Experiments:GetServerProperties(): AssignmentContext.PropertyMap
 end
 
 --[[
-	Reconciles the experiment catalog against a bootstrap/status payload and reacts
-	to what changed.
+	Reconciles the catalog against a bootstrap/status payload. New experiments trigger
+	assignment, removed ones have their assignments stripped and fire the changed signals.
 
-	New experiments trigger assignment for current players (user-unit) or the server
-	itself (server-unit). Removed experiments have their assignments stripped, firing
-	the changed signals so configs recompose.
-
-	Returns false when some experiment is still missing its changesets (a fetch failed),
-	so the caller knows the payload was not fully applied.
+	Returns false when some experiment is still missing its changesets, so the caller retries.
 
 	@canyield
 ]]
@@ -645,9 +622,8 @@ end
 --[[
 	Returns the ordered changesets to apply on top of the given config's base document.
 
-	Server-unit changesets come first (they define the server view all players inherit),
-	then the player's user-unit changesets, each in ascending experiment id order to match
-	the backend's merge order.
+	Server-unit changesets first (the server view all players inherit), then the player's
+	user-unit ones, each by ascending experiment id to match the backend's merge order.
 ]]
 function Experiments:GetChangesetsForConfig(configId: number, player: Player?): { Changesets.Changeset }
 	local function collect(unitType: "user" | "server", records: { [number]: AssignmentRecord })
@@ -783,9 +759,8 @@ function Experiments:OnAssignmentsResolvedForPlayer(player: Player, callback: ()
 		end
 	end))
 
-	-- Logout and teleport markers subscribe from inside PlayerRemoving, after the listener above can
-	-- hear it. ServerGate's removal fires a few seconds later, so it still releases them instead
-	-- of leaving them waiting on assignments that will never arrive for a departed player.
+	-- Callers subscribing from inside PlayerRemoving (logout, teleport markers) miss the listener
+	-- above. ServerGate's removal fires a few seconds later and still releases them.
 	listenerCleaner:Add(ServerGate:OnPlayerRemoved(function(removedPlayer: Player)
 		if removedPlayer == player then
 			resolve()

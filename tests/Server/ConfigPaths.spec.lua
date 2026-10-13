@@ -1,8 +1,7 @@
 --[[
-    Config paths into arrays. Paths are lists of strings, so an array element is addressed by a
-    segment like "2". Registers a configuration of its own, since the project this place is set up
-    with may not have a list in any of its documents. The Gamebeast SDK must be running so internal
-    modules are loaded.
+    Config paths into arrays, where an element is addressed by a string segment like "2". Registers
+    its own configuration, since the place's project may have no lists. The Gamebeast SDK must be
+    running so internal modules are loaded.
 ]]
 
 return function()

@@ -5,15 +5,11 @@
     LocalizationCache.lua
 
     Description:
-        Caches localization data for players, such as region and locale IDs.
+        Caches players' region and locale IDs.
 
-        The engine lookups behind it yield, and for a player who just joined they
-        can take seconds, so callers on a path that must not yield (engagement
-        markers) use OnResolved and fill their fields in once it comes back.
-
-        Each field is looked up and cached on its own: a caller that only needs
-        the region never waits on the translator, and a lookup that failed is
-        retried by the next caller rather than cached as unknown.
+        The engine lookups yield, for seconds for a player who just joined, so
+        callers that must not yield (engagement markers) use OnResolved. Each
+        field is cached on its own, and a failed lookup is not cached.
 
 --]]
 
@@ -50,7 +46,7 @@ local function ConvertLocaleToISO(localeId : string) : string
     return string.lower(locale[1])
 end
 
--- The engine lookup behind each field. Both yield, and either can fail for a player who just joined.
+-- Both yield, and either can fail for a player who just joined
 local FIELD_LOOKUPS : { [string] : (player : Player) -> string } = {
     localeId = function(player)
         return ConvertLocaleToISO(LocalizationService:GetTranslatorForPlayerAsync(player).LocaleId)
@@ -79,8 +75,7 @@ local function GetCachedField(player : Player, field : string) : string?
 end
 
 --[[
-    Starts the lookup for one field, unless it is already cached or in flight. Always ends in a signal
-    for that field, successful or not, so a caller waiting on it is never left hanging.
+    A started lookup always fires the signal for its field, success or not, so no waiter is left hanging.
 ]]
 local function ResolveField(player : Player, field : string)
     if GetCachedField(player, field) then
@@ -108,8 +103,7 @@ local function ResolveField(player : Player, field : string)
             Resolving[player] = nil
         end
 
-        -- Only successes are cached; caching a failure would pin the player to "unknown" for their
-        -- whole session, which reaches every marker and every country/language experiment filter.
+        -- Only successes are cached, so one failure doesn't pin the player to "unknown" for the session
         if value ~= nil then
             if not Cache[player] then
                 -- Refused by the cache once the player has left, hence the nil check below
@@ -167,9 +161,8 @@ end
 --= API Functions =--
 
 --[[
-    Starts whichever lookups are missing and hands the callback both fields once they have all come
-    back. Already cached, the callback runs before this returns and there is no connection to hold;
-    otherwise the connection waiting for them is returned, for callers to clean up with.
+    Calls back with both fields once resolved. If both are cached, the callback runs before this
+    returns and nil is returned; otherwise returns the waiting connection.
 ]]
 function LocalizationCache:OnResolved(player : Player | number, callback : (localization : Localization) -> ()) : RBXScriptConnection?
     player = Utilities.resolvePlayerObject(player)

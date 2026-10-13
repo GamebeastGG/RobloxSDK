@@ -91,9 +91,8 @@ function LaunchDataResolver:Init()
         end
 
         if rawLaunchData ~= "" then
-            -- Attempt a base64 decode. The service is fetched here rather than at module scope so
-            -- that an engine without it costs us base64 support, not the whole SDK: this module is
-            -- required in a loop that has no error handling around it.
+            -- EncodingService is fetched here, not at module scope, so an engine without it only loses
+            -- base64 support instead of failing this module's require (which nothing guards).
             local base64Decoded, launchDataBuffer = pcall(function()
                 return game:GetService("EncodingService"):Base64Decode(buffer.fromstring(rawLaunchData))
             end)
@@ -104,9 +103,8 @@ function LaunchDataResolver:Init()
                 end)
             end
 
-            -- Prefer the decoded form, then fall back to the raw string. Launch data that happens
-            -- to be base64-legal (a bare number, say) decodes to bytes that are not JSON, and
-            -- taking the decode as final dropped data that parsed perfectly well as it was sent.
+            -- Fall back to the raw string, since raw JSON that happens to be valid base64 (a bare
+            -- number, say) decodes to bytes that aren't JSON
             local candidates = if base64Decoded
                 then { buffer.tostring(launchDataBuffer), rawLaunchData }
                 else { rawLaunchData }

@@ -41,15 +41,14 @@ function Timer.new(timeSeconds : number)
 
     self._cleaner:Add(self._timedOutSignal)
 
-    -- A scheduled wake-up rather than a Heartbeat check: each pending player marker holds a timer,
-    -- and a check every frame per timer added up during join bursts
+    -- Scheduled rather than checked per frame, since every pending player marker holds a timer
     local thread = task.delay(timeSeconds, function()
         self._timedOutSignal:Fire(true)
         self:Destroy()
     end)
     self._cleaner:Add({
         Destroy = function()
-            -- Not while it runs: the timer's own end destroys it from inside that thread
+            -- Skipped while running, since the timer's own end destroys it from that thread
             if coroutine.status(thread) == "suspended" then
                 task.cancel(thread)
             end

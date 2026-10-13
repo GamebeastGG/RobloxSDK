@@ -11,11 +11,11 @@ type SDKSettings = {
 	environment : ("production" | "studio")?,
 	-- Seconds between engagement marker batch flushes to the backend.
 	markerFlushRate : number,
-	-- Seconds between status polls checking for configuration and experiment changes. Acts as a
-	-- floor: Gamebeast can ask servers to poll less often than this, never more often.
+	-- Seconds between status polls for config and experiment changes. A floor: Gamebeast can ask
+	-- servers to poll less often, never more.
 	statusPollRate : number,
-	-- Seconds between re-requesting experiment assignments for the players in the server and the
-	-- server itself, which is how assignment changes made on the dashboard reach a live server.
+	-- Seconds between re-requesting experiment assignments for all players and the server. This is
+	-- how dashboard assignment changes reach a live server.
 	assignmentRefreshRate : number,
 	-- Seconds between server state reports (players, server and client performance) to the backend.
 	serverReportRate : number
@@ -25,10 +25,9 @@ export type ServerSetupConfig = {
 	sdkSettings : SDKSettings?
 }
 
--- The settings Gamebeast:UpdateSettings can change on a running SDK, all optional: the ones left out
--- keep their current value. `environment` and `customUrl` are absent because they are fixed once the
--- SDK is set up; retargeting the backend mid-session would leave everything already loaded, configs,
--- experiments and the datastore backup, keyed to the environment it came from.
+-- Settings Gamebeast:UpdateSettings can change at runtime. Omitted ones keep their value.
+-- `environment` and `customUrl` are fixed at setup, since loaded configs, experiments and the
+-- datastore backup are keyed to the environment they came from.
 export type RuntimeSDKSettings = {
 	sdkWarningsEnabled : boolean?,
 	includeWarningStackTrace : boolean?,
@@ -39,7 +38,7 @@ export type RuntimeSDKSettings = {
 	serverReportRate : number?
 }
 
---NOTE: The actual JSON type doesnt get represented cleanly in Roblox's intellesense. This is a simplified version for now.
+--NOTE: The real JSON type doesn't render cleanly in Roblox intellisense, so this is simplified.
 export type JSON = any
 --[[{
     [string] : (number | string | boolean | JSON)
@@ -68,7 +67,7 @@ export type MarkersService = {
 	RetryFailedMarkersAsync : (self : MarkersService, failedMarkers : { {[string] : any} } ) -> boolean,
 }
 
--- Developer-defined experiment targeting property: a scalar or a list of scalars (max 100 items).
+-- Developer-defined experiment targeting property: a scalar or a list of one scalar type (max 100 items).
 export type ExperimentPropertyValue = string | number | boolean | { string | number | boolean }
 
 export type ExperimentsService = {

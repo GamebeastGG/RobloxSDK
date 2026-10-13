@@ -58,7 +58,7 @@ function ClientInfoHandler:UpdateClientInfo(key : string, value : any)
 
         for key in REQUIRED_KEYS do
             if not CurrentClientInfoCache[key] then
-                return -- Will not send signal that client info is ready until all required keys are set
+                return -- Not sent until every required key is set
             end
         end
 

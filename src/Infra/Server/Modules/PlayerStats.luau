@@ -41,7 +41,7 @@ local DEFAULT_SCHEMA = Schema.new({
 
 --= Variables =--
 
-local SessionData = ServerGate:GetCache() -- Cache for player session data, automatically cleared on player leave
+local SessionData = ServerGate:GetCache() -- Cleared on player leave
 
 --= Public Variables =--
 

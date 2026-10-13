@@ -5,7 +5,7 @@
     Experiments.luau
 
     Description:
-        Server-side API for reading experiment assignments for players and the server.
+        Server-side API for experiment assignments and targeting properties.
 
 --]]
 
@@ -89,12 +89,10 @@ end
 --= API Functions =--
 
 --[[
-    Sets developer-defined properties for a player, merged per key with any set
-    previously. They are sent as `context.properties` with experiment assignment
-    requests so experiments can target on them (e.g. { vip = true, level = 12 }).
-
-    Values must be strings, numbers, booleans, or lists of those (max 100 items).
-    Changing a property re-resolves the player's assignments.
+    Sets developer-defined targeting properties for a player, merged per key with existing
+    ones (e.g. { vip = true, level = 12 }). Values must be strings, numbers, booleans, or
+    lists of one of those types (max 100 items). Changing a property re-resolves the
+    player's assignments.
 ]]
 function Experiments:SetPlayerProperties(player : Player, properties : { [string] : Types.ExperimentPropertyValue })
     AssertPlayer(player, "SetPlayerProperties")
@@ -116,10 +114,9 @@ function Experiments:GetPlayerProperties(player : Player) : { [string] : Types.E
 end
 
 --[[
-    Sets developer-defined properties for this server, merged per key with any set
-    previously. They are sent with server assignment requests, and as shared context
-    for player assignment requests (a player's own property with the same key wins).
-    Changing a property re-resolves server and player assignments.
+    Sets developer-defined targeting properties for this server, merged per key with existing
+    ones. Player assignment requests see them too, though a player's own property with the
+    same key wins. Changing a property re-resolves server and player assignments.
 ]]
 function Experiments:SetServerProperties(properties : { [string] : Types.ExperimentPropertyValue })
     AssertPropertyTable(properties, "SetServerProperties")
@@ -138,8 +135,7 @@ function Experiments:GetServerProperties() : { [string] : Types.ExperimentProper
 end
 
 --[[
-    Returns the player's active experiment assignments. Multiple experiments can be
-    active at once (at most one per base configuration).
+    Returns the player's active experiment assignments, one per experiment they're in.
 ]]
 function Experiments:GetAssignmentsForPlayer(player : Player) : { Types.ExperimentAssignment }
     return BuildAssignments(player)
@@ -159,8 +155,7 @@ function Experiments:OnAssignmentsChangedForPlayer(player : Player, callback : (
         end
     end)
 
-    -- Ends when the player leaves (see the removal handler below); left to the developer, one that
-    -- was never disconnected kept the Player and ran on every assignment change for the server's life
+    -- Disconnected when the player leaves, see the removal handler below
     local subscriptions = SubscriptionsByPlayer[player]
     if not subscriptions then
         subscriptions = {}
@@ -182,8 +177,8 @@ end
     whenever they change.
 ]]
 function Experiments:ObserveAssignmentsForPlayer(player : Player, callback : (assignments : { Types.ExperimentAssignment }) -> ()) : RBXScriptConnection
-    -- A player's first resolution reaches both listeners below with the same assignments, which
-    -- called back twice; a set identical to the one last delivered is skipped
+    -- A player's first resolution reaches both listeners below, so a set identical to the last
+    -- one delivered is skipped
     local lastDeliveredKey : string? = nil
     local function deliver(assignments : { Types.ExperimentAssignment })
         local key = GetAssignmentsKey(assignments)
@@ -206,11 +201,9 @@ function Experiments:ObserveAssignmentsForPlayer(player : Player, callback : (as
 end
 
 --[[
-    Returns information about the experiment group currently assigned to the player, if any.
+    DEPRECATED: Use GetAssignmentsForPlayer / GetServerAssignments instead.
 
-    DEPRECATED: Multiple experiments can now be active at once; this returns only the
-    first active assignment (player assignments first, then server assignments).
-    Use GetAssignmentsForPlayer / GetServerAssignments instead.
+    Returns only the first active assignment, player assignments before server ones.
 ]]
 function Experiments:GetGroupForPlayer(player : Player) : Types.ExperimentGroupMetadata?
     local assignment = BuildAssignments(player)[1] or BuildAssignments(nil)[1]
@@ -230,8 +223,8 @@ do
         local subscriptions = SubscriptionsByPlayer[player]
         SubscriptionsByPlayer[player] = nil
 
-        -- Deferred so the subscriptions still hear the assignment change the player's removal fires
-        -- (their assignments clearing), which is raised by a listener on this same signal
+        -- Deferred so subscriptions still hear the assignment change that another listener on this
+        -- signal fires when it clears the player's assignments
         task.defer(function()
             for _, subscription in subscriptions or {} do
                 subscription:Disconnect()

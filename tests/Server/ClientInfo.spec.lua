@@ -1,7 +1,6 @@
 --[[
-    Unit tests for validating client-reported info. The client is untrusted, and these values reach
-    the experiment assignment request for the whole server and every marker the player fires.
-    No dashboard interaction required.
+    Unit tests for validating client-reported info. The client is untrusted, and these values go into
+    the player's markers and the server's shared assignment requests. No dashboard interaction required.
 ]]
 
 return function()

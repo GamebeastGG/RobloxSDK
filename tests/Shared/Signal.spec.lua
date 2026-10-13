@@ -157,7 +157,7 @@ return function()
             expect(results[3]).to.equal("ready")
         end)
 
-        -- Waiters used to poll a flag every frame, so none resumed until the frame after the fire
+        -- Checked right after Fire, so a waiter that polls would not have resumed yet
         it("should resume waiters during the fire itself, without polling", function()
             local signal = Signal.new()
             local resumed = 0

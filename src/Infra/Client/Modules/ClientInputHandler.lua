@@ -75,8 +75,8 @@ function ClientInputHandler:GetDeviceType() : (string, string)
                 deviceSubType = "phone"
             elseif aspectRatio <= 1.7 then
                 deviceSubType = "tablet"
-            else -- Devices in this range can be either phone or tablet equally. Older devices share the 16:9 aspect ratio.
-                deviceSubType = "phone" -- We'll assume phone for now, since phone users are more common.
+            else -- Could be either, older devices of both share 16:9
+                deviceSubType = "phone" -- Phone users are more common
             end
         end
     elseif deviceType == "console" then

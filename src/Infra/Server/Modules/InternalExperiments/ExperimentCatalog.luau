@@ -6,13 +6,9 @@
 	ExperimentCatalog.luau
 
 	Description:
-		Owns the catalog of active experiments: metadata reconciled from
-		bootstrap/status payloads, and per-group changesets fetched from
-		v2/experiments/active with hash-based change detection.
-
-		Group changesets are immutable once seen and are never refetched.
-		Assignment state lives in InternalExperiments; this module is purely
-		the source of truth for what experiments exist and what they change.
+		Catalog of active experiments: metadata from bootstrap/status payloads,
+		and per-group changesets fetched from v2/experiments/active. Group
+		changesets are immutable once seen and never refetched.
 
 --]]
 
@@ -84,8 +80,8 @@ local GlobalRequiredProperties: { string } = {}
 --= Internal Functions =--
 
 --[[
-	Fetches active experiments with changesets for the given unit type and merges
-	them into the catalog. Uses hash-based change detection; a 304 keeps the cache.
+	Fetches active experiments with changesets for a unit type and merges them into
+	the catalog. A 304 keeps the cache.
 
 	@canyield
 ]]
@@ -207,8 +203,8 @@ function ExperimentCatalog:GetMetadata(experimentId: number, groupId: number): {
 end
 
 --[[
-	Keeps only the experiments that are actually in the catalog, so a changeset fetch that failed
-	is not reported to the caller as a started experiment.
+	Drops experiments missing from the catalog, so a failed changeset fetch isn't reported as a
+	started experiment.
 ]]
 local function filterToCatalogued(experimentIds: { number }): { number }
 	local catalogued = {}
@@ -222,10 +218,8 @@ end
 
 --[[
 	Reconciles the catalog against a bootstrap/status payload: refreshes metadata,
-	removes stopped experiments, and fetches changesets for anything new.
-
-	Returns a summary of what changed so the caller can react to it
-	(trigger assignment for new experiments, strip assignments for removed ones).
+	removes stopped experiments, and fetches changesets for anything new. Returns a
+	summary of what changed.
 
 	@canyield
 ]]
@@ -275,9 +269,8 @@ function ExperimentCatalog:Update(experiments: ExperimentsByUnitType, requiredPr
 		if not seenExperimentIds[experimentId] then
 			Utilities.GBLog("Experiment stopped:", experimentId)
 
-			-- The active-catalog hash is only a 304 token for what this server has cached, so it has
-			-- to go with the cache. Kept, it lets a later refetch for a re-appearing experiment be
-			-- answered 304, which would leave that experiment with no changesets for good.
+			-- The hash is a 304 token for what's cached, so it goes with the cache. Otherwise a
+			-- re-appearing experiment could get a 304 and never receive its changesets.
 			ActiveHashByUnitType[state.meta.unitType] = nil
 
 			Catalog[experimentId] = nil
@@ -290,15 +283,13 @@ function ExperimentCatalog:Update(experiments: ExperimentsByUnitType, requiredPr
 		fetchActiveChangesets(unitType :: "user" | "server")
 	end
 
-	-- A fetch that failed leaves its experiments out of the catalog. Reporting them as started
-	-- anyway had the caller re-assign every player in the server on every poll, for experiments it
-	-- still had no changesets to apply. They stay uncatalogued and the summary says it is
-	-- incomplete, so the caller polls the full status again and the fetch is retried.
+	-- A failed fetch leaves its experiments uncatalogued. They aren't reported as started, and the
+	-- summary is marked incomplete below so the caller polls the full status again and retries.
 	summary.newUserExperimentIds = filterToCatalogued(summary.newUserExperimentIds)
 	summary.newServerExperimentIds = filterToCatalogued(summary.newServerExperimentIds)
 
-	-- Judged on the result rather than on the fetches: a fetch answered 304 by a stale cache also
-	-- leaves an experiment missing. Its unit type's hash is dropped so the retry is unconditional.
+	-- Checked on the result, not the fetches, since a 304 from a stale cache also leaves an
+	-- experiment missing. Dropping the hash makes the retry unconditional.
 	for _, unitType in { "user" :: "user" | "server", "server" :: "user" | "server" } do
 		for _, meta in experiments[unitType] do
 			local state = Catalog[meta.id]

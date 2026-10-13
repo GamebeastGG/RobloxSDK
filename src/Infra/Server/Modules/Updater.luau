@@ -36,63 +36,44 @@ local DatatstoreBackup = require(script.Parent.DatastoreBackup) ---@module Datas
 --= Types =--
 
 --[[
-	The polling object returned by the bootstrap and status endpoints: the backend's control over how
-	often servers poll, so requests can be shed globally without shipping an SDK update.
-
-	Normally it carries only a jitter ratio and servers poll on their statusPollRate setting. The
-	backend adds `intervalSeconds` only to shed load in an emergency, and drops it again after.
+	Polling object from the bootstrap and status endpoints, so the backend can shed poll load
+	without an SDK update. Usually carries only jitterRatio.
 ]]
 type PollingDirective = {
-	-- Seconds between status polls, sent only to shed load. Absent leaves servers on statusPollRate.
+	-- Sent only to shed load. Absent means statusPollRate applies.
 	intervalSeconds : number?,
-	-- Fraction of the interval to spread polls over, so servers don't line up on the same tick.
+	-- Fraction of the interval to spread polls over, so servers don't poll in lockstep.
 	jitterRatio : number?,
 }
 
 --= Constants =--
 
 --[[
-	When config is being applied, this controls the maximum amount of seconds
-	to wait for initial experiment assignment to complete before giving up
-	and using the canonical config.
-
-	If it takes longer, it will continue waiting for assignment to complete in the
-	background, and apply assigned configs as they are received.
+	Max seconds to wait for initial experiment assignment before applying the canonical config.
+	Assignment keeps going in the background and its views apply when it finishes.
 ]]
 local MAX_INITIAL_EXPERIMENT_ASSIGNMENT_WAIT_TIME = 10
 
---[[
-	Trailing debounce for backup saves, to respect DataStore same-key write throttling
-	when several config changes land in a short window.
-]]
+-- Delay before a queued backup save, so a burst of config changes shares one DataStore write.
 local BACKUP_SAVE_DEBOUNCE = 30
 
 --[[
-	How long to wait between attempts to reach the backend when bootstrap fails. The wait starts at
-	CONNECTION_RETRY_DELAY and doubles up to MAX_CONNECTION_RETRY_DELAY, spread by up to
-	CONNECTION_RETRY_JITTER: retrying every 10s forever had every server in fallback hit the heaviest
-	endpoint in lockstep as an outage ended, and a revoked key retried every 10s for a server's life.
+	Bootstrap retry backoff: doubles from CONNECTION_RETRY_DELAY up to MAX_CONNECTION_RETRY_DELAY,
+	plus up to CONNECTION_RETRY_JITTER, so servers in fallback don't all hit bootstrap together when
+	an outage ends.
 ]]
 local CONNECTION_RETRY_DELAY = 10
 local MAX_CONNECTION_RETRY_DELAY = 300
 local CONNECTION_RETRY_JITTER = 0.25
 
---[[
-	Version stamp for the backup blob format. Old-format backups are rejected.
-]]
+-- Backups with any other version are rejected.
 local BACKUP_SCHEMA_VERSION = 2
 
---[[
-	How often the status poll loop re-derives how long it should be waiting. Keeps a lowered
-	statusPollRate, or a lifted backend directive, from taking a whole long interval to be noticed.
-]]
+-- How often the poll loop re-derives its wait, so a lowered statusPollRate or a lifted directive
+-- applies without waiting out a long interval.
 local POLL_RECHECK_INTERVAL = 5
 
---[[
-	The largest jitter ratio a backend directive can ask for. A ratio spreads polls over
-	`intervalSeconds * ratio`, so anything beyond 1 would stretch the wait past twice the interval,
-	which is a decision for intervalSeconds to make, not jitter.
-]]
+-- Caps directive jitter so a wait never exceeds twice the interval. Longer waits are intervalSeconds' job.
 local MAX_POLL_JITTER_RATIO = 1
 
 --= Object References =--
@@ -104,19 +85,16 @@ local PrimaryBackup = DatatstoreBackup.new(RunService:IsStudio())
 local BackupSavePending = false
 
 --[[
-	Latest polling directive from the backend, as given. The statusPollRate floor is applied per poll
-	in GetPollDelay rather than here, so it keeps up with the setting being changed at runtime.
+	Latest backend polling directive, unclamped. GetPollDelay applies the statusPollRate floor per
+	poll so runtime setting changes take effect.
 ]]
 local PollingIntervalSeconds : number? = nil
 local PollingJitterRatio = 0
 
 --[[
-	Hash of the last status snapshot this server applied, sent back as ?hash= so an unchanged
-	snapshot answers 304 with no body. Only set once a payload has been applied in full: holding the
-	hash for a snapshot we failed to apply would have the backend answer 304 about work never done.
-
-	The bootstrap hash is deliberately not reused here. Both endpoints hash their own payload, and
-	bootstrap carries the configuration documents that status leaves out, so the two never match.
+	Hash of the last fully applied status snapshot, sent as ?hash= so an unchanged one answers 304.
+	Only set after a full apply, or a 304 would hide changes never applied. Not seeded from the
+	bootstrap hash, which covers a different payload.
 ]]
 local LastStatusHash : string? = nil
 
@@ -124,8 +102,7 @@ local LastStatusHash : string? = nil
 
 --= Internal Functions =--
 
--- Backups are scoped per environment so switching environments never restores
--- another environment's configs on the startup fallback path.
+-- Scoped per environment so the fallback never restores another environment's configs.
 local function GetBackupKey() : string
 	local environment = DataCache:Get("Settings").environment
 		or (RunService:IsStudio() and "studio" or "production")
@@ -154,8 +131,7 @@ end
 
 -- How long to wait before reconnection attempt `attempt` (1 for the first retry)
 function Updater:GetConnectionRetryDelay(attempt : number, statusCode : number?, jitterRoll : number?) : number
-	-- A rejected key won't start working by itself, so check back rarely; GBRequests has already
-	-- warned about the key
+	-- A rejected key won't fix itself, so check back rarely. GBRequests already warned about it.
 	local delay = if statusCode == 401 or statusCode == 403
 		then MAX_CONNECTION_RETRY_DELAY
 		else math.min(CONNECTION_RETRY_DELAY * 2 ^ (attempt - 1), MAX_CONNECTION_RETRY_DELAY)
@@ -163,8 +139,8 @@ function Updater:GetConnectionRetryDelay(attempt : number, statusCode : number?,
 	return delay * (1 + (jitterRoll or math.random()) * CONNECTION_RETRY_JITTER)
 end
 
--- Whether `current` is older than `latest`. Compared part by part as numbers: compared as strings,
--- "v1.9.0" sorted after "v1.10.0" and the out-of-date warning was missed. False if either can't be parsed.
+-- Whether `current` is older than `latest`, compared numerically so 1.9 sorts before 1.10.
+-- False if either can't be parsed.
 function Updater:IsVersionOutdated(current : string, latest : string) : boolean
 	local currentParts, latestParts = ParseVersion(current), ParseVersion(latest)
 	if not currentParts or not latestParts then
@@ -180,11 +156,9 @@ function Updater:IsVersionOutdated(current : string, latest : string) : boolean
 end
 
 --[[
-	Stores the polling object from a bootstrap or status response, dropping anything malformed.
-
-	It is the backend's lever for shedding load, so it can only ever slow polling down: an
-	`intervalSeconds` under the statusPollRate setting is ignored without warning the developer, which
-	keeps a mistaken deploy (an interval of 0.01) from turning every server into a request flood.
+	Stores the polling directive from a bootstrap or status response, dropping malformed fields.
+	It can only slow polling: an intervalSeconds under statusPollRate is ignored (logged, not
+	warned), so a bad value can't flood requests.
 ]]
 function Updater:SetPollingDirective(polling : PollingDirective?)
 	if polling ~= nil and type(polling) ~= "table" then
@@ -214,12 +188,9 @@ function Updater:SetPollingDirective(polling : PollingDirective?)
 end
 
 --[[
-	How long to wait before the next status poll: the longer of the statusPollRate setting and the
-	backend's interval, spread over the jitter the backend asked for.
-
-	Jitter only ever adds, so a poll never lands sooner than the interval in force allows.
-	`jitterRoll` is the 0-1 position within the jitter window, rolled once per poll by the caller so a
-	wait that is re-derived mid-flight doesn't re-roll into a shorter one.
+	Delay before the next status poll: the longer of statusPollRate and the backend interval, plus
+	jitter (which only adds). `jitterRoll` (0 to 1) is rolled once per poll by the caller, so
+	re-deriving the wait mid-flight doesn't re-roll it shorter.
 ]]
 function Updater:GetPollDelay(jitterRoll : number?) : number
 	local interval = DataCache:Get("Settings").statusPollRate
@@ -230,9 +201,8 @@ function Updater:GetPollDelay(jitterRoll : number?) : number
 	return interval * (1 + (jitterRoll or math.random()) * PollingJitterRatio)
 end
 
--- Composes and applies the evaluated views for a single config: the server view,
--- plus per-player views for players with experiment overlays.
--- `oldPrivacy` is passed through when the config's base just changed.
+-- Composes and applies a config's server view, plus per-player views for players with experiment
+-- overlays. `oldPrivacy` is only passed when the config's base just changed.
 function Updater:ComposeAndApplyConfig(configId : number, init : boolean?, oldPrivacy : { {string} }?)
 	local entry = InternalConfigs:GetBaseConfig(configId)
 	if not entry then
@@ -289,15 +259,14 @@ function Updater:ApplyBootstrap(bootstrap, init : boolean?)
 		seenConfigIds[configData.id] = true
 	end
 
-	-- Drop configs that no longer exist (e.g. re-bootstrap after an outage)
+	-- Drop configs missing from this payload (e.g. re-bootstrap after an outage)
 	for configId in InternalConfigs:GetConfigHashes() do
 		if not seenConfigIds[configId] then
 			InternalConfigs:RemoveConfig(configId)
 		end
 	end
 
-	-- Reconcile experiments and trigger assignment, if applicable
-	-- (this may yield, so it's limited by a timer to avoid blocking config readiness for too long)
+	-- Assignment may yield, so it's capped to keep config readiness from waiting on it too long
 	if bootstrap.experiments then
 		local thread = coroutine.running()
 		local didResume = false
@@ -322,18 +291,15 @@ function Updater:ApplyBootstrap(bootstrap, init : boolean?)
 
 	self:ComposeAndApplyAll(init, oldPrivacyByConfigId)
 
-	-- Only now is every configuration in this payload composed and applied
+	-- Ready only once every config in the payload is applied
 	InternalConfigs:SetReady()
 
 	self:QueueBackupSave()
 end
 
--- Applies a status poll payload: refetches configs whose hash changed, removes
--- configs that disappeared, and reconciles the experiment catalog.
---
--- Returns whether everything in the payload was applied. When a refetch fails, or a stale cache
--- answers it with an old version, the caller must not keep this snapshot's hash: sent back, it
--- would have every later poll answered 304 and the change would never be retried.
+-- Applies a status poll payload: refetches configs whose hash changed, removes missing ones, and
+-- reconciles the experiment catalog. Returns whether everything applied. If not, the caller must
+-- drop this snapshot's hash, or later polls answer 304 and the change is never retried.
 function Updater:ApplyStatus(status) : boolean
 	-- Read before the refetches below, so a directive shedding load still lands if they fail
 	self:SetPollingDirective(status.polling)
@@ -351,8 +317,7 @@ function Updater:ApplyStatus(status) : boolean
 			continue
 		end
 
-		-- The backend resolves configurations by alias only (normalized the same way it
-		-- stores them); a name slugs to the same value, so it serves as the fallback.
+		-- The endpoint resolves by alias. A name slugs to the same value, so it works as a fallback.
 		local configIdentifier = configStatus.alias or configStatus.name
 		if not configIdentifier then
 			-- Not counted as incomplete: retrying can't help until the config gets an alias or name,
@@ -366,7 +331,7 @@ function Updater:ApplyStatus(status) : boolean
 			hash = knownHashes[configStatus.id],
 		})
 
-		-- The status says the content changed, so a 304 here comes from a cache that hasn't caught up
+		-- Status says the content changed, so a 304 here is a cache that hasn't caught up
 		if statusCode == 304 then
 			Utilities.GBLog("Config", configStatus.id, "is not updated yet where it is fetched from; retrying next poll")
 			isComplete = false
@@ -379,26 +344,24 @@ function Updater:ApplyStatus(status) : boolean
 			continue
 		end
 
-		-- The hash is both this config's change-detection token and how GetConfigHashes lists it at
-		-- all; registering one without a hash would leave a config that is never recomposed, never
-		-- backed up and impossible to remove. The endpoint always sends one, so this is a guard
-		-- against a non-conforming response rather than an expected path.
+		-- GetConfigHashes only lists configs with a hash, so one without would never be recomposed,
+		-- backed up or removed. Guards a malformed response.
 		if type(configResp.hash) ~= "string" then
 			Utilities.GBWarn("Config", configStatus.id, "was returned without a hash and was not applied.")
 			isComplete = false
 			continue
 		end
 
-		-- Fetched by alias, so it can come back as a different config if the alias moved between the
-		-- status and this fetch; applying it would store that config's content under this one's id
+		-- Fetched by alias, so it can be a different config if the alias moved since the status. Applying
+		-- it would store that config's content under this id.
 		if configResp.configurationId ~= nil and tonumber(configResp.configurationId) ~= configStatus.id then
 			Utilities.GBLog("Config", configStatus.id, "fetched as", configResp.configurationId, "; retrying next poll")
 			isComplete = false
 			continue
 		end
 
-		-- Applied either way, since it is newer than what we hold, but a version other than the one
-		-- the status lists means the fetch hasn't caught up; the next poll checks again
+		-- Applied anyway since it's newer than ours, but it isn't the version the status lists, so
+		-- the next poll checks again
 		if configResp.hash ~= configStatus.hash then
 			isComplete = false
 		end
@@ -442,7 +405,7 @@ function Updater:GetBackupConfigs()
 		return nil
 	end
 
-	-- Reject old-format backups; they cannot be fed into the v2 pipeline
+	-- Other schema versions can't be applied
 	if not backup or backup.schemaVersion ~= BACKUP_SCHEMA_VERSION then
 		return nil
 	end
@@ -450,8 +413,8 @@ function Updater:GetBackupConfigs()
 	return backup.configurations
 end
 
--- Save current config base documents to Roblox datastores for backup.
--- Experiments are never backed up; assignments cannot be resolved offline.
+-- Saves config base documents to the DataStore backup. Experiments aren't backed up, since
+-- assignments can't be resolved offline.
 function Updater:SaveConfigsToBackup()
 	local configurations = {}
 	for configId in InternalConfigs:GetConfigHashes() do
@@ -476,7 +439,7 @@ function Updater:SaveConfigsToBackup()
 	})
 end
 
--- Queues a debounced backup save, coalescing bursts of config changes into one write.
+-- Coalesces config changes within BACKUP_SAVE_DEBOUNCE into one backup write.
 function Updater:QueueBackupSave()
 	if BackupSavePending then
 		return
@@ -507,8 +470,8 @@ function Updater:Init()
 		return (if success then bootstrap else nil), statusCode
 	end
 
-	-- An apply that throws counts as a failed attempt. Unprotected, it ended this thread, so
-	-- status polling never started and the server stayed on whatever it had for its whole life.
+	-- An apply that throws counts as a failed attempt, so it can't end this thread before status
+	-- polling starts.
 	local function tryApply(payload, isInit : boolean) : boolean
 		local didApply, applyError = pcall(self.ApplyBootstrap, self, payload, isInit)
 		if not didApply then
@@ -523,8 +486,8 @@ function Updater:Init()
 	if not (bootstrap and tryApply(bootstrap, true)) then
 		Utilities.GBWarn("Couldn't get configurations from Gamebeast. Attempting to load from backup...")
 
-		-- Try to get datastore backed up configs so the game can run while we reconnect.
-		-- Once they are applied, applying live data is no longer an initialization: diff and replicate.
+		-- Run on the DataStore backup while reconnecting. If it applies, the live apply after it
+		-- isn't an init, so it diffs and replicates.
 		local isInit = true
 		local backupConfigurations = self:GetBackupConfigs()
 		if backupConfigurations and tryApply({
@@ -570,14 +533,12 @@ function Updater:Init()
 		while true do
 			local remaining = self:GetPollDelay(jitterRoll) - (tick() - lastPollTime)
 			if remaining > 0 then
-				-- Capped so a settings change or a new directive is picked up within
-				-- POLL_RECHECK_INTERVAL instead of at the end of a long wait
+				-- Capped so a settings or directive change is picked up within POLL_RECHECK_INTERVAL
 				task.wait(math.min(remaining, POLL_RECHECK_INTERVAL))
 				continue
 			end
 
-			-- The hash of the snapshot we already hold goes back with the poll, so an unchanged one
-			-- answers 304 with no body and the steady-state poll costs a few bytes each way
+			-- An unchanged snapshot answers 304 with no body
 			local didSucceed, status, statusCode = GBRequests:GBRequestAsync("v2/status", {
 				hash = LastStatusHash,
 			})
@@ -585,15 +546,14 @@ function Updater:Init()
 			if statusCode == 304 then
 				Utilities.GBLog("Status unchanged since the last poll")
 			elseif didSucceed and status then
-				-- Applied under pcall: an error in here used to kill this thread outright, leaving the
-				-- server silently frozen on its last known configs and experiments until it shut down
+				-- pcall so an apply error can't kill the poll loop
 				local didApply, applyResult = pcall(self.ApplyStatus, self, status)
 
 				if didApply and applyResult then
 					LastStatusHash = status.hash
 				elseif didApply then
-					-- Part of it didn't land (a refetch failed or was stale). Not keeping the hash makes
-					-- the next poll return the full snapshot, which retries exactly what is missing.
+					-- A refetch failed or was stale. Dropping the hash gets the full snapshot next poll,
+					-- which retries only what's missing.
 					LastStatusHash = nil
 					Utilities.GBLog("Status poll applied in part; retrying the rest next poll")
 				else
@@ -605,8 +565,7 @@ function Updater:Init()
 				Utilities.GBLog("Status poll failed, retrying next interval")
 			end
 
-			-- Timed from the end of the cycle, so a slow or failed poll can never tighten the
-			-- cadence the interval asked for
+			-- Timed from the end of the cycle, so a slow poll can't tighten the cadence
 			lastPollTime = tick()
 			jitterRoll = math.random()
 		end

@@ -33,9 +33,8 @@ local ServerGate = require(script.Parent.ServerGate) ---@module ServerGate
 local ClientInfoRemote = GetRemote("Event", "ClientInfoChanged")
 local ClientInfoRequestRemote = GetRemote("Function", "GetClientInfo")
 local ClientProductPriceRemote = GetRemote("Function", "GetProductPrice")
--- Neither signal copies its arguments per listener. Every pending marker listens for its player's
--- info to resolve, so each join copied the info once per pending marker in the server. Listeners
--- receive a clone (OnClientInfoResolved) or a validated scalar (OnClientInfoChanged).
+-- No per-listener argument copies, since every pending marker listens here. Listeners get a clone
+-- (OnClientInfoResolved) or a validated scalar (OnClientInfoChanged) instead.
 local ClientInfoResolvedSignal = Signal.new({ copyArguments = false })
 local ClientInfoChangedSignal = Signal.new({ copyArguments = false })
 
@@ -70,7 +69,7 @@ local DefaultInfo = Schema.new({
         default = "unknown",
         type = "string",
     },
-    -- Preserved
+    -- Kept by the client across teleports within the game
     sessionId = {
         default = nil,
         type = "string",
@@ -102,10 +101,8 @@ local ClientInfoCache = ServerGate:GetCache()
 --= Internal Functions =--
 
 --[[
-    Whether a value reported by a client may be stored. The client is untrusted, and these values
-    reach a lot: device and input type go into the experiment assignment request, which covers every
-    player in the server, so one bad value used to have the whole request rejected; all of them are
-    stamped on the player's markers; and the numbers feed session arithmetic on the way out.
+    Whether a client-reported value may be stored. The client is untrusted, and device and input type
+    go into the server-wide experiment assignment request, where one bad value gets it all rejected.
 ]]
 local function IsValidClientInfo(key : string, value : any) : boolean
     if not DefaultInfo:MatchesType(key, value) then
@@ -128,7 +125,7 @@ local function IsValidClientInfo(key : string, value : any) : boolean
         end
 
         if key == "sessionId" then
-            -- The SDK generates these with GenerateGUID; anything else did not come from it
+            -- The SDK generates these with GenerateGUID
             return string.match(value, SESSION_ID_PATTERN) ~= nil
         end
     end
@@ -282,8 +279,7 @@ function ServerClientInfoHandler:GetProductInfoForPlayer(player : Player | numbe
         return nil
     end
 
-    -- Bounded: InvokeClient waits as long as the client takes, so a client that never answered held
-    -- the Purchase marker until the player left, and lost it if the server shut down first
+    -- Bounded, since InvokeClient waits as long as the client takes
     local thread = coroutine.running()
     local isDone = false
 
@@ -314,7 +310,7 @@ function ServerClientInfoHandler:UpdateClientData(player : Player | number, key 
 
     self:OnClientInfoResolved(player, function()
         if not player.Parent then
-            return -- Player is not in the game, do not update cache
+            return -- Player left
         end
 
         --UpdateClientInfoCache(player, {[key] = value}, true) -- We actually want the client to send this back to us.

@@ -1,10 +1,7 @@
 --[[
-    Exercises the public Configs service against whatever configurations the project this place is
-    set up with, rather than a "TestConfig" someone has to create in the dashboard by hand first.
-
-    Runs on both the server and the client, so it only touches the public service. It needs the
-    project to have at least one configuration; that is asserted up front so an empty project fails
-    with a clear reason instead of a row of unexplained nils.
+    Exercises the public Configs service against whatever configurations this place's project has.
+    Runs on both server and client, so it only touches the public service. The project needs at
+    least one configuration, asserted up front so an empty project fails with a clear reason.
 
     NOTE: Config paths begin with the configuration's alias or name.
 ]]
@@ -17,8 +14,7 @@ return function()
     local CALLBACK_TIMEOUT = 5
     local MISSING_KEY = "__gbKeyThatDoesNotExist"
 
-    -- OnReady hands over every configuration keyed by its identifier and fires as soon as the SDK is
-    -- ready, so it doubles as the way to discover what there is to test against here.
+    -- OnReady passes every configuration keyed by identifier, so it doubles as discovery of what to test
     local function resolveConfigs() : any
         local resolved = nil
         ConfigsService:OnReady(function(configs)
@@ -33,9 +29,8 @@ return function()
         return resolved
     end
 
-    -- Depth-first search for a path that ends in a scalar, so the nested-path test works whatever
-    -- shape the documents happen to have. String keys only, so the order is stable; paths into
-    -- arrays are covered by the server's ConfigPaths spec.
+    -- Finds a path to a scalar so the nested-path test works with any document shape. String keys
+    -- only, so the order is stable. Array paths are covered by the server's ConfigPaths spec.
     local function findScalarPath(document : any) : ({ string }?, any)
         local keys = {}
         for key in document do
@@ -127,8 +122,7 @@ return function()
 
             expect(topLevelKey).to.be.ok()
 
-            -- Compared by type rather than truthiness, so a top-level value of false or a nested
-            -- table passes just as well as a string would
+            -- Compared by type, so a top-level false or nested table passes too
             local value = ConfigsService:Get({ ctx.identifier, topLevelKey })
             expect(type(value)).to.equal(type(ctx.document[topLevelKey]))
         end)
@@ -153,7 +147,6 @@ return function()
             expect(ConfigsService:Get({ ctx.identifier, MISSING_KEY, MISSING_KEY })).never.to.be.ok()
         end)
 
-        -- Walking past a number or string used to error ("attempt to index number")
         it("should return nothing for a path that runs past a plain value", function()
             local ctx = context()
             local path = findScalarPath(ctx.document)
@@ -196,8 +189,7 @@ return function()
         it("should listen to a config changing", function()
             local ctx = context()
 
-            -- A dashboard edit is what fires this, so what is checked here is the subscription
-            -- itself: that it is live, and that disconnecting it takes effect.
+            -- Only a dashboard edit fires this, so only the subscription itself is checked
             local connection = ConfigsService:OnChanged(ctx.identifier, function() end)
 
             expect(connection).to.be.ok()

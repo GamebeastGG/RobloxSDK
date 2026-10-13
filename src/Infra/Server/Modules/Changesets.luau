@@ -5,16 +5,13 @@
 	Changesets.luau
 
 	Description:
-		Applies experiment changeset operations to configuration documents.
-		Changesets are ordered lists of operations (set/add/delete at a path)
-		that transform a base configuration into an experiment group's variant.
+		Applies experiment changesets (ordered set/add/delete operations at a path)
+		to a base configuration document, producing an experiment group's variant.
 
-		Semantics intentionally mirror the backend's changesetMerge so that a
-		locally composed view is identical to a backend-evaluated one:
-		- "add" behaves exactly like "set".
-		- Paths only traverse dictionaries. A missing segment, a non-table value,
-		  or an array anywhere along the path makes the whole operation a no-op.
-		- Missing intermediate tables are never created.
+		Mirrors the backend's merge so a local view matches a backend-evaluated one.
+		"add" behaves like "set". Paths only traverse dictionaries: a missing segment,
+		a non-table value or an array along the path makes the operation a no-op, and
+		missing intermediate tables are never created.
 
 --]]
 
@@ -64,9 +61,8 @@ local function ApplyOperation(doc : { [string] : any }, operation : ChangesetOpe
 	local key = path[#path]
 
 	if operation.op == "set" or operation.op == "add" then
-		-- Copied, matching the backend's copy-on-write merge. By reference, a later operation that
-		-- writes inside this value (set shop, then set shop.price) changed the cached changeset
-		-- itself, and once the composed view was frozen the next composition hit a read-only table.
+		-- Copied so a later operation writing inside it (set shop, then set shop.price) can't mutate
+		-- the cached changeset, which would also be frozen along with the composed view.
 		parent[key] = if type(operation.value) == "table" then Utilities.recursiveCopy(operation.value) else operation.value
 	elseif operation.op == "delete" then
 		parent[key] = nil

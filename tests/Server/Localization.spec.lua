@@ -1,14 +1,12 @@
 --[[
-    Unit tests for player localization lookups. The engine calls behind them yield, so what matters
-    here is that starting one never yields the caller: engagement markers are fired from threads that
-    must not yield, which is what SendPlayerMarker used to do.
+    Unit tests for player localization lookups. The engine calls behind them yield, but starting one
+    must never yield the caller, since engagement markers fire from threads that must not yield.
 ]]
 
 return function()
     local LocalizationCache = require(game:GetService("ReplicatedStorage"):WaitForChild("Gamebeast").Infra.Server.Modules.LocalizationCache)
 
-    -- Resolves to "unknown" for both fields when the test server is empty, which covers the same
-    -- paths without needing a player.
+    -- Nil in an empty server, which resolves both fields to "unknown" and covers the same paths
     local player = game.Players:GetPlayers()[1]
 
     describe("OnResolved", function()

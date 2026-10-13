@@ -6,7 +6,7 @@ This SDK is intended for use with the Roblox platform.
 ## What is Gamebeast?
 Gamebeast specializes in providing real-time analytics and tools for user engagement, allowing developers to make data-driven decisions to enhance their games.
 
-From the Gamebeast dashboard, developers can automatically detect player pain points and make live updates to their experience. By making adjustments that are seamless to their users, the experience is optimized for engagement - creating a boost in developer revenue.
+From the Gamebeast dashboard, developers can automatically detect player pain points and make live updates to their experience. By making adjustments that are seamless to their users, the experience is optimized for engagement, boosting developer revenue.
 
 
 Some of the key features Gamebeast provides include:
@@ -45,10 +45,10 @@ Experiments:SetServerProperties({ region = "eu", mode = "ranked" })
 Values must be strings, numbers, booleans, or lists of one of those types (up to 100 items). A player or the server can have up to 100 properties, with names up to 128 characters; the SDK warns and ignores anything outside these limits, which Gamebeast would otherwise reject for the whole server. Set player properties as soon as their data loads: assignment is requested shortly after join, and changing a property afterwards re-resolves that player's assignments.
 
 Relevant `sdkSettings`:
-- `markerFlushRate` — seconds between engagement marker batch flushes (default 10, minimum 1).
-- `statusPollRate` — seconds between change-detection polls (default 30, minimum 5). Servers poll on this setting, spread over a small jitter window so they don't all poll on the same tick. During an incident Gamebeast can temporarily ask servers to poll less often, to shed load; it never makes them poll more often than this.
-- `assignmentRefreshRate` — seconds between re-requesting experiment assignments for the players in the server and the server itself (default 30, minimum 10). This is how an assignment changed from the dashboard, such as a manual group reassignment, reaches players who are already in game.
-- `serverReportRate` — seconds between server state reports, which carry the players in the server and server and client performance (default 30, minimum 10, maximum 45). The cap keeps a report in every minute: concurrent player counts on the dashboard are built per minute from the servers that reported in it.
+- `markerFlushRate`: seconds between engagement marker batch flushes (default 10, minimum 1).
+- `statusPollRate`: seconds between change-detection polls (default 30, minimum 5). During an incident Gamebeast can ask servers to poll less often, never more.
+- `assignmentRefreshRate`: seconds between re-requesting experiment assignments for all players and the server (default 30, minimum 10). This is how a dashboard change like a manual group reassignment reaches players already in game.
+- `serverReportRate`: seconds between server state reports with player counts and performance (default 30, minimum 10, maximum 45). Player counts are built per minute, so a report has to land every minute.
 
 In Studio, any rate you leave out of `sdkSettings` defaults faster, so dashboard edits show up quickly while you test: `markerFlushRate` 2s, `statusPollRate` 5s, `assignmentRefreshRate` 10s and `serverReportRate` 10s. Rates you set yourself are used as given, in Studio and in live servers.
 
@@ -59,7 +59,7 @@ The `sdkSettings` passed to `Setup` can be changed on a running SDK with `Update
 Gamebeast:UpdateSettings({ statusPollRate = 120, sdkDebugEnabled = true })
 ```
 
-Changes take effect from the next use — the status poll, assignment refresh, server report and marker flush loops pick theirs up within a few seconds. `environment` and `customUrl` are the exception and can only be set in `Setup`: they decide which backend the SDK talks to, and swapping that mid-session would leave the configs, experiments and datastore backup already loaded keyed to the environment they came from.
+Changes apply within a few seconds. `environment` and `customUrl` can only be set in `Setup`, since they decide which backend the SDK talks to.
 
 ## Installation
 To get started with Gamebeast, sign up at https://dashboard.gamebeast.gg/

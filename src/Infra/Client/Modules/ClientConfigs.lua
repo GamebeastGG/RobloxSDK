@@ -30,9 +30,8 @@ local SignalConnection = require(script.Parent.Parent.Parent.Shared.Modules.Sign
 local GetConfigRemoteFunc = GetRemote("Function", "Get")
 local ConfigChangedRemote = GetRemote("Event", "ConfigChanged")
 local ConfigIdentitiesChangedRemote = GetRemote("Event", "ConfigIdentitiesChanged")
--- Neither signal copies its arguments per listener: every Configs:Observe adds a listener, and with
--- ~1,600 of them each fire used to make ~1,600 deep copies of the configuration. Listeners only read
--- the arguments, and the old config a change carries is frozen before it is shared.
+-- Arguments aren't copied per listener, since every Configs:Observe adds one. Listeners only read
+-- them, and the old config a change carries is frozen.
 local ConfigUpdatedSignal = Signal.new({ copyArguments = false })
 local ConfigReadySignal = Signal.new({ copyArguments = false })
 
@@ -77,8 +76,8 @@ local function DeepFreeze(object)
     end
 end
 
--- The key in `container` a change path segment refers to: as given, or as an array index. Privacy
--- paths arrive as strings, while arrays are keyed by number.
+-- The key in `container` a path segment refers to: as given, or as an array index, since privacy
+-- and Get paths are strings.
 local function ResolveSegment(container, segment)
     if container[segment] == nil then
         local index = tonumber(segment)
@@ -93,10 +92,8 @@ local function ResolveConfigId(identifier : string) : number?
     return IdByIdentifier[tostring(identifier)]
 end
 
--- Returns every cached config document keyed by consumer identifier.
--- Keyed off IdentifierByConfigId rather than IdByIdentifier: the latter resolves every spelling
--- of a config (id, name and alias), which listed the same document up to three times here while
--- the server's equivalent listed it once.
+-- Every cached config document keyed by consumer identifier. Uses IdentifierByConfigId since
+-- IdByIdentifier holds every spelling (id, name, alias) of each config.
 local function GetAllViews()
     local views = {}
     for configId, identifier in IdentifierByConfigId do
@@ -145,9 +142,7 @@ function ClientConfigs:Get(path : string | { string }, _configs : any?)
     end
 
 	for index = 2, #path do
-        -- Stops at a value that isn't a table: a path through a number (say, after an edit turned
-        -- a table into one) used to error in the developer's callback. A segment like "2" also
-        -- reaches an array element, since paths are strings.
+        -- Stops at non-table values. A segment like "2" also indexes arrays, since paths are strings.
         if type(target) ~= "table" then
             return nil
         end
@@ -206,9 +201,7 @@ end
 --= Initializers =--
 function ClientConfigs:Init()
     -- The server sends its identifier maps whenever a config is renamed, given an alias, created or
-    -- deleted. Before, they only arrived with the first payload, so Get on a renamed config's new
-    -- name returned nil here while the server resolved it. (The initial payload carries them too,
-    -- so updates before it arrives are ignored.)
+    -- deleted. Updates before the initial payload are ignored, since it carries them too.
     ConfigIdentitiesChangedRemote.OnClientEvent:Connect(function(idByIdentifier, identifierByConfigId)
         if not ConfigsReady or type(idByIdentifier) ~= "table" or type(identifierByConfigId) ~= "table" then
             return
@@ -217,7 +210,7 @@ function ClientConfigs:Init()
         IdByIdentifier = idByIdentifier
         IdentifierByConfigId = identifierByConfigId
 
-        -- A deleted config's values were already cleared by its last change; now its entry goes too
+        -- A deleted config's values are cleared by its last change, so only the entry is left to drop
         for configKey in CachedConfigs do
             if identifierByConfigId[configKey] == nil then
                 CachedConfigs[configKey] = nil
@@ -260,9 +253,7 @@ function ClientConfigs:Init()
                 IdByIdentifier = payload.idByIdentifier
                 IdentifierByConfigId = payload.identifierByConfigId
 
-                -- OnChanged and Observe resolve their identifier when fired, so they support
-                -- subscribing to a config that does not exist yet. Without this they never heard
-                -- about the config they were waiting for.
+                -- So OnChanged and Observe subscribed before this config existed still fire
                 ConfigUpdatedSignal:Fire(configId, changes, nil)
             end)
             return
@@ -274,8 +265,7 @@ function ClientConfigs:Init()
             local path = change.path
 
             -- An empty path is the whole config: the server sends one when an entire config becomes
-            -- private (no value) or public again (its full value). It used to be a no-op, so a config
-            -- made private kept its last public values on clients already in game.
+            -- private (no value) or public again (its full value).
             if #path == 0 then
                 config = if type(change.newValue) == "table" then change.newValue else {}
                 CachedConfigs[configKey] = config
@@ -292,9 +282,8 @@ function ClientConfigs:Init()
 
                 local child = target[key]
                 if type(child) ~= "table" then
-                    -- The parent is gone, removed by an earlier change in this batch. A removal has
-                    -- nothing left to do; a value is written into a fresh table, as on the server.
-                    -- Indexing the missing parent errored and lost the rest of the batch.
+                    -- Parent missing or not a table (e.g. removed earlier in this batch). A removal
+                    -- has nothing left to do, a value goes into a fresh table.
                     if change.newValue == nil then
                         break
                     end
@@ -305,8 +294,8 @@ function ClientConfigs:Init()
             end
         end
 
-        -- Shared by every listener rather than copied for each, so nothing may change it. The change
-        -- list is not frozen: its values were just written into the live cache above.
+        -- Shared by every listener, so frozen. The change list isn't, since its values were just
+        -- written into the live cache.
         DeepFreeze(oldConfig)
         ConfigUpdatedSignal:Fire(configId, changes, oldConfig)
     end)

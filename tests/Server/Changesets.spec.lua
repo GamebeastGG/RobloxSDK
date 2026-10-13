@@ -1,9 +1,9 @@
 --[[
-    Pure unit tests for changeset application; no dashboard interaction required.
+    Pure unit tests for changeset application, no dashboard interaction required.
     The Gamebeast SDK must be running so internal modules are loaded.
 
-    Semantics mirror the backend's changesetMerge: "add" is "set", paths only
-    traverse dictionaries, and missing intermediates are never created.
+    Matches the backend's merge: "add" is "set", paths only traverse dictionaries,
+    and missing intermediates are never created.
 ]]
 
 return function()
@@ -95,8 +95,7 @@ return function()
             expect(result.a.b).never.to.be.ok()
         end)
 
-        -- The applied value used to be stored by reference, so the second operation wrote into
-        -- the cached changeset, and once the composed view was frozen the next apply errored
+        -- Set values are copied in, so a later write can't reach the cached changeset or a view frozen from it
         it("should not change a changeset when a later operation writes inside a value it set", function()
             local shop = { price = 10 }
             local cached = changeset({

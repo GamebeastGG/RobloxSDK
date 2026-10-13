@@ -26,8 +26,7 @@ local ExportMetricsRemote = GetRemote("Event", "ExportClientMetrics")
 --= Constants =--
 -- how often the metric collector will probe for built in metrics
 local PROBE_FREQUENCY = 1 -- seconds
--- how often the client instance of MetricCollector will report it's metrics
--- to the server
+-- how often the client reports its metrics to the server
 local REPORT_FREQUENCY = 10 -- seconds
 
 function ClientMetricExporter:Init()
@@ -41,7 +40,7 @@ function ClientMetricExporter:Init()
         end
     end)
 
-    -- if on client, report metrics on timer
+    -- report metrics on timer
     task.spawn(function()
         while task.wait(REPORT_FREQUENCY) do
             local metricHistory = MetricCollector:ReadAndResetAllMetrics()

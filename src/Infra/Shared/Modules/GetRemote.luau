@@ -19,7 +19,7 @@ local RunService = game:GetService("RunService")
 
 --= Internal Functions =--
 
---Some experiences have long load times, to silence the warning we wait for 30 seconds before warning about infinite yield.
+-- Some experiences load slowly, so this waits 30s before its own infinite yield warning
 local function WaitForRemoteFolder()
     local didWarn = false
     repeat

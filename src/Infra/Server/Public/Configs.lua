@@ -43,13 +43,13 @@ function Configs:GetForPlayer(player: Player, path: string | {string}) : any
 end
 
 function Configs:Observe(targetConfig : string | { string }, callback : (newValue : any, oldValue : any) -> ()) : RBXScriptConnection
-    local onChangedSignal = self:OnChanged(targetConfig, callback) -- OnChanged does not fire when OnReady fires.
-    
-    task.spawn(function() -- Get will yeild until ready, so this works as initial callback + wait for ready
+    local onChangedSignal = self:OnChanged(targetConfig, callback) -- OnChanged doesn't fire for the initial load
+
+    task.spawn(function() -- Get yields until ready, so this also covers the initial load
         local data = self:Get(targetConfig)
 
         if onChangedSignal.Connected then
-            callback(data, nil) -- Initial callback with nil oldValue
+            callback(data, nil)
         end
     end)
 

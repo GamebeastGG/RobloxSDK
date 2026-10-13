@@ -1,10 +1,7 @@
 --[[
-    Unit tests for developer-defined experiment targeting properties; no dashboard
+    Unit tests for developer-defined experiment targeting properties, no dashboard
     interaction required. The Gamebeast SDK must be running so internal modules
-    are loaded.
-
-    Server properties are exercised directly. Player properties need a Player and
-    are only exercised when one is present in the server.
+    are loaded. The player property tests need a player in the server.
 ]]
 
 return function()
@@ -74,7 +71,7 @@ return function()
             expect(AssignmentContext:SetServerProperties({ list = atLimit })).to.equal(true)
         end)
 
-        -- Each of these is rejected by the backend for the whole request (up to 250 players)
+        -- The backend rejects the whole request (up to 250 players) over one of these
         it("should reject lists that mix value types", function()
             expect(AssignmentContext:SetServerProperties({ mixed = { 1, "a" } })).to.equal(false)
             expect(AssignmentContext:SetServerProperties({ flags = { true, 1 } })).to.equal(false)
@@ -169,7 +166,7 @@ return function()
             expect(contextByPlayerId[player.UserId].properties.vip).to.equal(true)
         end)
 
-        -- Targeting names what it reads by context path; this is the shape the backend sends
+        -- Targeting names what it reads by context path, the shape the backend sends
         it("should gather standard properties named by their context path", function()
             local contextByPlayerId = AssignmentContext:GetForPlayers({ player.UserId }, { "roblox.country", "roblox.language" })
             local context = contextByPlayerId[player.UserId]

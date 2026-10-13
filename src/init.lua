@@ -49,7 +49,7 @@ type PublicModuleData = {
 
 --= Setting Validators =--
 
--- Describes a rejected value for an error message, quoting strings so an empty one is visible
+-- For error messages. Strings are quoted so an empty one is visible
 local function DescribeValue(val : any) : string
 	if type(val) == "string" then
 		return `"{val}"`
@@ -64,8 +64,7 @@ local function BooleanValidator(val : any) : (boolean, string?)
 	return true
 end
 
--- Validates an interval in seconds, refusing anything below `minimum` to keep request volume sane,
--- and anything above `maximum` when the backend needs the data at least that often
+-- `minimum` keeps request volume sane. `maximum` is for data the backend needs at least that often
 local function SecondsValidator(minimum : number, maximum : number?) : (val : any) -> (boolean, string?)
 	return function(val)
 		if type(val) ~= "number" or val ~= val then
@@ -84,9 +83,8 @@ end
 --= Constants =--
 
 --[[
-	`studioValue` replaces `value` as the default when running in Studio, so edits on the dashboard
-	show up quickly while testing. It only fills in settings the developer left out of Setup, and the
-	validators' minimums still apply.
+	`studioValue` is the default in Studio, so dashboard edits show up quickly while testing. It only
+	fills in settings left out of Setup, and the validators still apply.
 ]]
 local DEFAULT_SETTINGS = {
 	sdkWarningsEnabled = {
@@ -113,8 +111,7 @@ local DEFAULT_SETTINGS = {
 	environment = {
 		value = nil,
 		validator = function(val)
-			-- Only the two built-in environments: markers, server reports and cohorts can't address
-			-- any other, so a custom one would split a game's data across two.
+			-- Markers, server reports and cohorts only know these two, so a custom one would split a game's data
 			if val ~= nil and val ~= "production" and val ~= "studio" then
 				return false, `Expected "production", "studio" or nil, got {DescribeValue(val)}.`
 			end
@@ -139,15 +136,12 @@ local DEFAULT_SETTINGS = {
 	serverReportRate = {
 		value = 30,
 		studioValue = 10,
-		-- Capped below a minute: concurrent player counts are built per minute from the servers that
-		-- reported in it, and player online status treats a report older than 2 minutes as gone
+		-- Capped under a minute, since concurrent player counts are built per minute from these reports
 		validator = SecondsValidator(10, 45),
 	},
 }
 
--- Settings :UpdateSettings() refuses, because they decide which backend the SDK talks to: swapping
--- that mid-session would leave the configs, experiments and datastore backup it has already loaded
--- keyed to the environment they came from.
+-- Refused by :UpdateSettings(). They pick the backend, and data already loaded stays keyed to the old one.
 local SETUP_ONLY_SETTINGS = {
 	customUrl = true,
 	environment = true,
@@ -376,19 +370,15 @@ function Gamebeast:Setup(setupConfig : ServerSetupConfig?)
 end
 
 --[[
-	Changes SDK settings on a running SDK. Settings left out of the table keep their current value, and
-	nothing is applied unless every setting given is valid.
-
-	The SDK reads settings as it needs them rather than holding onto them, so a change takes effect
-	from the next use: the status poll, assignment refresh, server report and marker flush loops pick theirs up within a few seconds.
-
-	`environment` and `customUrl` are refused here; they are only set in :Setup().
+	Changes settings on a running SDK. Omitted settings keep their value, and nothing is applied unless
+	every given setting is valid. Changes apply from each setting's next use, so the polling and flush
+	loops pick theirs up within a few seconds. `environment` and `customUrl` are Setup only.
 ]]
 function Gamebeast:UpdateSettings(sdkSettings : RuntimeSDKSettings)
 	assert(type(sdkSettings) == "table", "Gamebeast:UpdateSettings expects a table of settings.")
 	assert(DidSetup, "Gamebeast:UpdateSettings can only be used after Gamebeast:Setup().")
 
-	-- Validated up front, so a bad value leaves the settings it was sent with untouched
+	-- Validated up front so one bad value applies nothing
 	for key, value in sdkSettings do
 		if SETUP_ONLY_SETTINGS[key] then
 			error(`The Gamebeast SDK setting "{key}" can only be set in Gamebeast:Setup().`, 2)
@@ -397,7 +387,7 @@ function Gamebeast:UpdateSettings(sdkSettings : RuntimeSDKSettings)
 		ValidateSetting(key, value)
 	end
 
-	-- Written into the live table rather than replacing it, since the SDK reads fields off it
+	-- Written into the live table, so references to it stay current
 	local settings = RequireModule(GetModule("DataCache")):Get("Settings")
 	for key, value in sdkSettings do
 		settings[key] = value

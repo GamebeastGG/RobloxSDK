@@ -7,13 +7,9 @@
 
 	Description:
 		Builds the evaluation context sent with experiment assignment requests
-		(the `context` / `sharedContext` objects of the v2 endpoints).
-
-		A context has two sections:
-		- `roblox`: standard properties (device, locale, place, ...) gathered by
-		  the SDK itself, only when experiment targeting requires them.
-		- `properties`: developer-defined properties set through the public
-		  Experiments service, stored here per player and for the server.
+		(`context` / `sharedContext` in the v2 endpoints). `roblox` holds standard
+		properties, gathered only when targeting requires them. `properties` holds
+		developer-defined ones set through the public Experiments service.
 
 --]]
 
@@ -50,9 +46,8 @@ export type Context = {
 local CONTEXT_SCHEMA_VERSION = 1
 
 --[[
-	Backend limits on developer-defined properties (sdk-contract core/limits.ts). A request breaking
-	any of them is rejected whole, and a user request carries up to 250 players, so they are enforced
-	here, when a property is set, rather than discovered as a failing request for the whole server.
+	Backend limits on developer-defined properties. A request breaking any of them is rejected
+	whole, failing every player in the batch, so they are enforced when a property is set.
 ]]
 local MAX_LIST_PROPERTY_ITEMS = 100
 local MAX_PROPERTY_NAME_LENGTH = 128
@@ -65,11 +60,9 @@ local MAX_PROPERTIES = 100
 local MAX_CALLBACK_DURATION = 6
 
 --[[
-	A value the player's client reports, once it has (bounded by MAX_CALLBACK_DURATION).
-
-	The wait used to have no limit, and a player leaving never resumed it, so each assignment request
-	for a player without the client SDK left waiting threads behind. Nil until the client reports,
-	rather than the "unknown" default, so targeting never mistakes a missing value for a real one.
+	A value the player's client reports, waiting at most MAX_CALLBACK_DURATION for it. Nil until
+	the client reports, rather than the "unknown" default, so targeting never mistakes a missing
+	value for a real one.
 ]]
 local function GetClientReportedInfo(player: Player, key: string): any
 	ServerClientInfoHandler:WaitUntilClientInfoResolved(player, MAX_CALLBACK_DURATION)
@@ -80,16 +73,9 @@ local function GetClientReportedInfo(player: Player, key: string): any
 end
 
 --[[
-	When experiments have filters that require player properties, these
-	callbacks are ran to retrieve and include that context in assignment
-	requests.
-
-	These callbacks can yield, but ideally should not yield for too long. If a
-	callback yields for longer than `MAX_CALLBACK_DURATION` seconds, the
-	assignment request will proceed without its result.
-
-	placeId/placeVersion are omitted here because they are sent in the request's
-	shared context instead.
+	Getters for standard player properties that targeting requires. They may yield, but past
+	`MAX_CALLBACK_DURATION` the request goes out without their result. placeId/placeVersion
+	travel in the shared context instead.
 ]]
 local PLAYER_PROPERTY_GETTERS: { [string]: (player: Player) -> any } = {
 	inputType = function(player)
@@ -110,8 +96,7 @@ local PLAYER_PROPERTY_GETTERS: { [string]: (player: Player) -> any } = {
 }
 
 --[[
-	The player properties only the player's client can report. Until it does, they are missing from
-	that player's context.
+	Player properties only the client can report, missing from the context until it does.
 ]]
 local CLIENT_REPORTED_PROPERTIES: { [string]: true } = {
 	inputType = true,
@@ -120,15 +105,14 @@ local CLIENT_REPORTED_PROPERTIES: { [string]: true } = {
 }
 
 --[[
-	When experiments have filters that require server properties, these
-	callbacks are ran to retrieve and include that context in assignment
-	requests. (placeId/placeVersion travel in the shared context.)
+	Getters for standard server properties that targeting requires. placeId/placeVersion
+	travel in the shared context.
 ]]
 local SERVER_PROPERTY_GETTERS: { [string]: () -> any } = {}
 
 --[[
-	Standard properties every request already carries in its shared context (see GetShared), so
-	targeting on them needs nothing gathered per unit.
+	Standard properties every request carries in its shared context (see GetShared), so nothing
+	is gathered per unit for them.
 ]]
 local SHARED_ROBLOX_PROPERTIES: { [string]: true } = {
 	placeId = true,
@@ -136,10 +120,8 @@ local SHARED_ROBLOX_PROPERTIES: { [string]: true } = {
 }
 
 --[[
-	The context namespaces a required property can be read from. Targeting names each property by
-	its full context path (`roblox.inputType`, `properties.accountTier`), and the namespace decides
-	where the SDK finds the value. `unit.*` paths (`unit.isNewUser`) are resolved by the backend
-	from the unit itself, so the SDK has nothing to send for them.
+	Namespaces of a required property's context path (`roblox.inputType`, `properties.accountTier`).
+	`unit.*` paths are resolved by the backend, so the SDK sends nothing for them.
 ]]
 local ROBLOX_NAMESPACE = "roblox"
 local PROPERTIES_NAMESPACE = "properties"
@@ -171,9 +153,8 @@ local function runBounded(callbacks: { () -> () })
 end
 
 --[[
-	Splits a required property path into its context namespace and the key within it, e.g.
-	`roblox.inputType` into "roblox" and "inputType". Only the first dot separates them, since a
-	developer-defined property key may contain dots of its own.
+	Splits a property path like `roblox.inputType` into namespace and key. Only the first dot
+	splits, since developer-defined keys may contain dots.
 ]]
 local function splitPropertyPath(path: string): (string?, string)
 	local namespace, key = string.match(path, "^([^%.]+)%.(.+)$")
@@ -196,9 +177,7 @@ local function isScalar(value: any): boolean
 end
 
 --[[
-	Checks that a property value matches what the backend accepts: a string,
-	finite number, boolean, or a list of one of those types with at most
-	`MAX_LIST_PROPERTY_ITEMS` items. Returns a reason when invalid.
+	Checks a property value against what the backend accepts. Returns a reason when invalid.
 ]]
 local function validatePropertyValue(value: any): (boolean, string?)
 	if isScalar(value) then
@@ -220,7 +199,7 @@ local function validatePropertyValue(value: any): (boolean, string?)
 			return false, `list item {itemCount} has unsupported type "{typeof(item)}"`
 		end
 
-		-- The backend rejects mixed lists outright: containsAny over them has no stable meaning
+		-- The backend rejects mixed lists, containsAny over them has no stable meaning
 		listType = listType or type(item)
 		if type(item) ~= listType then
 			return false, `lists must hold one type of value, but item {itemCount} is a {type(item)} in a list of {listType}s`
@@ -312,9 +291,8 @@ end
 --= API Functions =--
 
 --[[
-	Merges developer-defined properties for a player (nil values are not
-	representable in a table; use SetPlayerProperty to clear one).
-	Returns whether anything changed.
+	Merges developer-defined properties for a player. Use SetPlayerProperty to clear one,
+	since a table can't hold nil. Returns whether anything changed.
 ]]
 function AssignmentContext:SetPlayerProperties(player: Player, properties: { [string]: any }): boolean
 	if player.Parent == nil then
@@ -387,9 +365,8 @@ function AssignmentContext:GetServerProperties(): PropertyMap
 end
 
 --[[
-	Returns the shared context for a bulk assignment request: facts every unit in
-	the batch shares (this place, and the server's developer-defined properties).
-	Per-unit context values win over these per key.
+	Shared context for a bulk assignment request: this place and the server's
+	developer-defined properties. Per-unit context values win over these per key.
 ]]
 function AssignmentContext:GetShared(): { [string]: any }
 	local sharedContext: { [string]: any } = {
@@ -408,13 +385,10 @@ function AssignmentContext:GetShared(): { [string]: any }
 end
 
 --[[
-	Gathers per-player evaluation context: the standard properties required by
-	experiment targeting, plus the player's developer-defined properties.
-	Players who resolve no context are omitted from the result.
+	Gathers per-player evaluation context. Players who resolve no context are omitted.
 
-	Also returns the players whose client had not reported in by the time gathering gave up, when
-	targeting needs a property only their client can report. Their context went without it, so
-	their assignment is worth requesting again once the client does report.
+	Also returns players whose client hadn't reported in when targeting needs a client-reported
+	property, so their assignment can be requested again once it does.
 
 	@canyield
 ]]
@@ -482,9 +456,7 @@ function AssignmentContext:GetForPlayers(playerIds: { number }, requiredProperti
 end
 
 --[[
-	Gathers server evaluation context: the standard properties required by
-	experiment targeting, plus the server's developer-defined properties.
-	Returns nil when nothing resolves.
+	Gathers server evaluation context. Returns nil when nothing resolves.
 
 	@canyield
 ]]

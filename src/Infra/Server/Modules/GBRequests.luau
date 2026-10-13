@@ -32,7 +32,7 @@ local URL_SUFFIX = "/sdk"
 local ENDPOINTS = {
 	{ 
 		URL = "https://api.gamebeast.gg", -- http://localhost:3001 -- https://api.gamebeast.gg -- https://api.stage.gamebeast.gg
-		Requests = { -- NOTE: If you require URL parameters, use {param} in the route string. Example: "v1/servers/roblox/{serverId}"
+		Requests = { -- NOTE: Use {param} in a route for URL parameters, e.g. "v1/servers/roblox/{serverId}"
 			["v1/markers"] = "POST",
 			["v1/latest/version?platform=roblox"] = "GET",
 			["v1/servers/roblox/{serverId}"] = "POST",
@@ -57,7 +57,7 @@ local RequestProcessingCount = 0
 
 --= Variables =--
 local KeyYeildWarning = false
--- One time warning if requests are failing because of invalid/unset key
+-- One-time warning for an invalid or unset key
 local KeyWarningGiven = false
 
 --= Internal Functions =--
@@ -92,7 +92,7 @@ end
 
 --= API Functions =--
 
--- Callback that is fired when the game is shutting down for final request processing.
+-- Runs the callback at shutdown, for sending final requests. It must not yield.
 function GBRequests:OnFinalRequestCall(callback : () -> ())
 	return FinalRequestSignal:Connect(function()
 		local currentThread = coroutine.running()
@@ -103,8 +103,7 @@ function GBRequests:OnFinalRequestCall(callback : () -> ())
 	end)
 end
 
--- Main method for dispatching requests from SDK to backend
--- Returns parsed body and original response if body can be resolve and response only otherwise
+-- Fire-and-forget POST to the backend. Returns nothing.
 function GBRequests:GBRequest(requestRoute : string, args : {[string] : any}, headerOverrides : {[string] : any}?, maxRetries : number?) : nil
 	local _, requestsMethod = GetEndpointForRequest(requestRoute)
 	if requestsMethod ~= "POST" then
@@ -117,9 +116,9 @@ function GBRequests:GBRequest(requestRoute : string, args : {[string] : any}, he
 end
 
 --YEILDS
--- Returns success, parsed response body (if any), and the response status code (if a response was received).
+-- Returns success, the parsed body if any, and the status code if a response came back.
 function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any}, headerOverrides : {[string] : any}?, maxRetries : number?) : (boolean, any?, number?)
-	local authKey = YeildForKey() -- Will wait for Key and Settings to be set
+	local authKey = YeildForKey() -- Setup sets the key and settings together
 	local GBDomain, requestMethod = GetEndpointForRequest(requestRoute)
 	
 	if not GBDomain or not requestMethod then
@@ -138,8 +137,8 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 		isStudioHeader = ENVIRONMENT_MAP[targetEnvironment]
 	end
 
-	-- Define relevant headers. Backend enforces header presence unless specified.
-	-- "environment" is the v2 header ("studio" is accepted as a synonym for development), "isstudio" remains for v1 routes.
+	-- Backend enforces header presence unless noted. "environment" is for v2 routes, where "studio"
+	-- means development. "isstudio" is for v1 routes.
 	local headers = {
 		["authorization"] = authKey,
 		["isstudio"] = isStudioHeader,
@@ -147,8 +146,7 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 		["sdkversion"] = MetaData.version,
 		["universeid"] = tostring(game.GameId),
 		["serverid"] = Utilities.getServerId(),
-		-- The v2 spelling. The snapshot rate limit is keyed on it; without it, every server behind
-		-- one egress IP shares a single bucket, which a large game exhausts.
+		-- The snapshot rate limit is keyed on this. Without it, servers behind one egress IP share a bucket.
 		["server-id"] = Utilities.getServerId(),
 	}
 
@@ -161,9 +159,7 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 
 	local url = GBDomain.. "/".. requestRoute
 
-	-- Encoded before the request counts as in flight. A value JSON can't represent (a sparse or
-	-- mixed table in marker data, say) throws here; counted first, it left BindToClose waiting out
-	-- the full 30s on a request that never went out, and killed the calling thread.
+	-- Encoded before counting the request as in flight, so a payload JSON can't encode never holds up BindToClose.
 	local didEncode, encodeError = pcall(function()
 		if requestMethod == "POST" or requestMethod == "PUT" then
 			requestBody = HttpService:JSONEncode(args)
@@ -212,7 +208,7 @@ function GBRequests:GBRequestAsync(requestRoute : string, args : {[string] : any
 			return HttpService:JSONDecode(response.Body)
 		end)
 
-		-- 304 is the expected "not modified" response for hash-based change detection, not a failure.
+		-- 304 is the expected "not modified" reply to hash-based change detection
 		if success == false and statusCode ~= 304 then
 			Utilities.GBWarn("Request failed ("..statusCode.. ") | ".. requestRoute .." | "..(bodyParsed and bodyParsed.message or "Unknown error"))
 		end

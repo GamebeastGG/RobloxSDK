@@ -2,7 +2,7 @@
 	The Gamebeast SDK is Copyright © 2023 Gamebeast, Inc. to present.
 	All rights reserved.
 	
-	SocialHandler.luau
+	SocialHandler.lua
 	
 	Description:
         Handles tracking social interactions between players in the server.

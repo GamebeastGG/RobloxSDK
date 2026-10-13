@@ -24,8 +24,7 @@ return function()
 
         afterAll(function()
             settings.statusPollRate = previousPollRate
-            -- There is no getter for the directive in force, so this leaves the running SDK
-            -- without one until the next status poll re-applies it from the payload
+            -- No getter for the live directive, so the SDK runs without one until the next status poll
             Updater:SetPollingDirective(nil)
         end)
 
@@ -68,7 +67,7 @@ return function()
             end
         end)
 
-        -- The backend's normal response: jitter only, with an interval added just to shed load
+        -- Jitter only is the usual response. An interval is only sent to shed load.
         it("should spread polls on the setting when Gamebeast sends only a jitter ratio", function()
             Updater:SetPollingDirective({ jitterRatio = 0.5 })
             expect(Updater:GetPollDelay(0)).to.equal(POLL_RATE)

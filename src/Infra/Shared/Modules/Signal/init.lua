@@ -50,10 +50,9 @@ end
 --= Constructor =--
 
 --[[
-    By default every listener gets its own deep copy of each argument, so one listener can't change
-    what the next one sees. Pass `copyArguments = false` for signals whose arguments are large and
-    only read: a config signal with ~1,600 listeners made ~1,600 copies of the configuration per
-    fire. Its listeners then share the arguments, so they must not modify them.
+    By default each listener gets its own deep copy of the arguments, so one can't change what the
+    next sees. Pass `copyArguments = false` for large, read-only arguments with many listeners.
+    Listeners then share the arguments and must not modify them.
 ]]
 function Signal.new(options : { copyArguments : boolean? }?) : Signal
     local self = setmetatable({}, Signal)
@@ -97,11 +96,8 @@ function Signal:Once(callback : (any) -> ()) : SignalConnection
 end
 
 --[[
-    Yields until the next fire and returns its arguments.
-
-    The thread is suspended and resumed by the fire itself. It used to poll a flag with
-    `repeat task.wait() until isFired`, so every waiting thread was resumed every frame: with ~1,600
-    config subscriptions waiting on the first payload, that was ~1,600 resumes per frame per client.
+    Yields until the next fire and returns its arguments. Resumed by the fire rather than polling,
+    since many config subscriptions can be waiting at once.
 ]]
 function Signal:Wait() : ...any
     local thread = coroutine.running()
@@ -117,12 +113,8 @@ function Signal:Wait() : ...any
 end
 
 --[[
-    Calls every listener connected when the fire begins.
-
-    Iterates over a snapshot of the listeners. Walking the live list let a listener that connected
-    another one mid-fire shift the list under the loop, so the next listener in line was silently
-    skipped. Now a listener connected during a fire waits for the next one, and a listener
-    disconnected during a fire (by an earlier listener) is not called, matching RBXScriptSignal.
+    Calls every listener connected when the fire begins. One connected mid-fire waits for the next
+    fire, and one disconnected mid-fire by an earlier listener is skipped, matching RBXScriptSignal.
 ]]
 function Signal:Fire(...)
     local argCount = select("#", ...)
@@ -134,8 +126,7 @@ function Signal:Fire(...)
         end
 
         -- Disconnected before it runs, so a fire from inside its own callback can't call it again.
-        -- Marked here and removed in one pass below: disconnecting each one through its connection
-        -- costs a search of the listener list apiece, which adds up with ~1,600 waiters.
+        -- Removed in one pass below, since Disconnect searches the list and many waiters can be pending.
         if callbackData.isOnce then
             callbackData.disconnected = true
             callbackData.connection.Connected = false
