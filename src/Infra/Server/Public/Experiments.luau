@@ -35,6 +35,15 @@ local SubscriptionsByPlayer = {} :: { [Player] : { RBXScriptConnection } }
 
 --= Internal Functions =--
 
+-- Identifies an assignment set by its experiments, groups and sources
+local function GetAssignmentsKey(assignments : { Types.ExperimentAssignment }) : string
+    local parts = table.create(#assignments)
+    for _, assignment in assignments do
+        table.insert(parts, `{assignment.experimentId}:{assignment.groupId}:{assignment.source or ""}`)
+    end
+    return table.concat(parts, ",")
+end
+
 local function BuildAssignments(player : Player?) : { Types.ExperimentAssignment }
     local assignments = {}
 
@@ -173,11 +182,23 @@ end
     whenever they change.
 ]]
 function Experiments:ObserveAssignmentsForPlayer(player : Player, callback : (assignments : { Types.ExperimentAssignment }) -> ()) : RBXScriptConnection
-    local onChangedSignal = self:OnAssignmentsChangedForPlayer(player, callback)
+    -- A player's first resolution reaches both listeners below with the same assignments, which
+    -- called back twice; a set identical to the one last delivered is skipped
+    local lastDeliveredKey : string? = nil
+    local function deliver(assignments : { Types.ExperimentAssignment })
+        local key = GetAssignmentsKey(assignments)
+        if key == lastDeliveredKey then
+            return
+        end
+        lastDeliveredKey = key
+        callback(assignments)
+    end
+
+    local onChangedSignal = self:OnAssignmentsChangedForPlayer(player, deliver)
 
     InternalExperiments:OnAssignmentsResolvedForPlayer(player, function()
         if onChangedSignal.Connected then
-            callback(BuildAssignments(player))
+            deliver(BuildAssignments(player))
         end
     end)
 
