@@ -35,7 +35,7 @@ function getVersion(fileText) {
   console.log('Payload size (bytes):', Buffer.byteLength(output));
 
   try {
-    await fetch("http://127.0.0.1:3000/update-sdk-deployment", {
+    const response = await fetch("http://127.0.0.1:3000/update-sdk-deployment", {
       method: "POST",
       headers: {
         "content-type": "application/json"
@@ -43,6 +43,13 @@ function getVersion(fileText) {
       body: output,
     });
 
+    // fetch only throws when no response arrives; a rejected deployment still has to fail the job
+    if (!response.ok) {
+      console.error(`Deployment failed: ${response.status} ${response.statusText}`, await response.text());
+      process.exit(1);
+    }
+
+    console.log(`Deployed SDK ${version}`);
     process.exit(0);
   } catch (err) {
     console.error("Deployment failed:", err);
