@@ -220,6 +220,7 @@ function utilities.getTableValues<K, V>(t: { [K]: V }): { V }
 end
 
 --- Returns the value found when traversing `root` upon reaching the given `path`.
+--- A segment that names no key is tried as an array index too, since privacy paths are strings.
 function utilities.getValueAtPath(root: any, path: { string }): any
 	local value = root
 	for _, pathSegment in path do
@@ -227,7 +228,11 @@ function utilities.getValueAtPath(root: any, path: { string }): any
 			value = nil
 			break
 		end
-		value = value[pathSegment]
+		local nextValue = value[pathSegment]
+		if nextValue == nil and tonumber(pathSegment) ~= nil then
+			nextValue = value[tonumber(pathSegment)]
+		end
+		value = nextValue
 	end
 	return value
 end

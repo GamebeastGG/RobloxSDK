@@ -77,6 +77,18 @@ local function DeepFreeze(object)
     end
 end
 
+-- The key in `container` a change path segment refers to: as given, or as an array index. Privacy
+-- paths arrive as strings, while arrays are keyed by number.
+local function ResolveSegment(container, segment)
+    if container[segment] == nil then
+        local index = tonumber(segment)
+        if index ~= nil and container[index] ~= nil then
+            return index
+        end
+    end
+    return segment
+end
+
 local function ResolveConfigId(identifier : string) : number?
     return IdByIdentifier[tostring(identifier)]
 end
@@ -133,10 +145,13 @@ function ClientConfigs:Get(path : string | { string }, _configs : any?)
     end
 
 	for index = 2, #path do
-        if target == nil then
+        -- Stops at a value that isn't a table: a path through a number (say, after an edit turned
+        -- a table into one) used to error in the developer's callback. A segment like "2" also
+        -- reaches an array element, since paths are strings.
+        if type(target) ~= "table" then
             return nil
         end
-        target = target[path[index]]
+        target = target[ResolveSegment(target, path[index])]
     end
 
 	return target
@@ -159,7 +174,7 @@ function ClientConfigs:OnChanged(targetConfig : string | {string}, callback : (n
                 local changeSegment = change.path[index - 1]
                 if changeSegment == nil then
                     break
-                elseif changeSegment ~= targetConfig[index] then
+                elseif tostring(changeSegment) ~= tostring(targetConfig[index]) then
                     match = false
                     break
                 end

@@ -140,6 +140,26 @@ local function RebuildIdentifierMap()
 	QueueIdentityBroadcast()
 end
 
+--[[
+	Whether two path segments name the same key. Privacy paths arrive from the backend as strings,
+	while a change through an array carries numeric indexes, so `"1" ~= 1` kept a private array
+	element from ever matching its privacy path.
+]]
+local function IsSameSegment(a : any, b : any) : boolean
+	return a == b or tostring(a) == tostring(b)
+end
+
+-- The key in `container` a privacy path segment refers to: as given, or as an array index
+local function ResolveSegment(container : { [any] : any }, segment : any) : any
+	if container[segment] == nil then
+		local index = tonumber(segment)
+		if index ~= nil and container[index] ~= nil then
+			return index
+		end
+	end
+	return segment
+end
+
 local function IsPathPrivate(path : {string}, privatePaths: {{string}}) : boolean
 	for _, privacyPath in privatePaths do
 		if #privacyPath > #path then
@@ -150,7 +170,7 @@ local function IsPathPrivate(path : {string}, privatePaths: {{string}}) : boolea
 		for index, pathSegment in ipairs(path) do -- a, d
 			if privacyPath[index] == nil then
 				return true
-			elseif pathSegment ~= privacyPath[index] then
+			elseif not IsSameSegment(pathSegment, privacyPath[index]) then
 				match = false
 				break
 			end
@@ -176,7 +196,7 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 		for index, pathSegment in ipairs(path) do -- a, d
 			if privacyPath[index] == nil then
 				break
-			elseif pathSegment ~= privacyPath[index] then
+			elseif not IsSameSegment(pathSegment, privacyPath[index]) then
 				match = false
 				break
 			end
@@ -212,10 +232,10 @@ local function FilterConfigForClient(path : {string}, config : {[string] : any},
 		local target = configCopy
 		for index, pathSegment in targetPath do
 			if index == #targetPath then
-				target[pathSegment] = nil
+				target[ResolveSegment(target, pathSegment)] = nil
 				break
 			else
-				target = target[pathSegment]
+				target = target[ResolveSegment(target, pathSegment)]
 
 				-- Covers a scalar as well as a missing key: either way the privacy path runs deeper
 				-- than the document does, so there is nothing there to remove
@@ -389,7 +409,7 @@ function InternalConfigs:OnChanged(player: Player?, targetConfig : string | {str
 				local changeSegment = change.path[index - 1]
 				if changeSegment == nil then
 					break
-				elseif targetConfig[index] ~= changeSegment then
+				elseif not IsSameSegment(targetConfig[index], changeSegment) then
 					match = false
 					break
 				end
@@ -693,14 +713,16 @@ function InternalConfigs:Get(player: Player?, path : string | { string }, config
 
 	-- Overrides are config-local documents (e.g. old configs in OnChanged), so the
 	-- identifier segment is skipped rather than resolved.
+	-- Both walks stop at a value that isn't a table: a path that runs through a number (say, after a
+	-- dashboard edit turned a table into one) used to error in the developer's callback. A segment
+	-- like "2" also reaches an array element, since paths are strings.
 	if configsOverride then
 		local value = configsOverride
 		for index = 2, #path do
-			value = value[path[index]]
-
-			if value == nil then
+			if type(value) ~= "table" then
 				return nil
 			end
+			value = value[ResolveSegment(value, path[index])]
 		end
 
 		return value
@@ -720,10 +742,10 @@ function InternalConfigs:Get(player: Player?, path : string | { string }, config
 		or entry.serverView
 
 	for index = 2, #path do
-		if value == nil then
+		if type(value) ~= "table" then
 			return nil
 		end
-		value = value[path[index]]
+		value = value[ResolveSegment(value, path[index])]
 	end
 
 	return value

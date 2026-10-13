@@ -34,7 +34,8 @@ return function()
     end
 
     -- Depth-first search for a path that ends in a scalar, so the nested-path test works whatever
-    -- shape the documents happen to have. String keys only: Get traverses dictionaries, not arrays.
+    -- shape the documents happen to have. String keys only, so the order is stable; paths into
+    -- arrays are covered by the server's ConfigPaths spec.
     local function findScalarPath(document : any) : ({ string }?, any)
         local keys = {}
         for key in document do
@@ -150,6 +151,25 @@ return function()
             local ctx = context()
             expect(ConfigsService:Get({ ctx.identifier, MISSING_KEY })).never.to.be.ok()
             expect(ConfigsService:Get({ ctx.identifier, MISSING_KEY, MISSING_KEY })).never.to.be.ok()
+        end)
+
+        -- Walking past a number or string used to error ("attempt to index number")
+        it("should return nothing for a path that runs past a plain value", function()
+            local ctx = context()
+            local path = findScalarPath(ctx.document)
+            expect(path).to.be.ok()
+
+            local fullPath = { ctx.identifier }
+            for _, segment in path do
+                table.insert(fullPath, segment)
+            end
+            table.insert(fullPath, MISSING_KEY)
+
+            local ok, value = pcall(function()
+                return ConfigsService:Get(fullPath)
+            end)
+            expect(ok).to.equal(true)
+            expect(value).never.to.be.ok()
         end)
 
         it("should hand an observer the current value", function()
