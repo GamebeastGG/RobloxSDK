@@ -64,7 +64,9 @@ Changes apply within a few seconds. `environment` and `customUrl` can only be se
 ## Installation
 To get started with Gamebeast, sign up at https://dashboard.gamebeast.gg/
 
-Gamebeast can be installed directly to Roblox Studio through our Roblox Plugin, or via Roblox focused package managers such as Wally. 
+Gamebeast can be installed directly to Roblox Studio through our Roblox Plugin, or with a Roblox package manager:
+- [Forest](https://forest.dev/p/roblox/gamebeast/RobloxSDK): `forest install gamebeast/RobloxSDK`
+- [Wally](https://wally.run/package/gamebeast-gg/gamebeast)
 
 Please visit https://docs.gamebeast.gg/Roblox/Installation for more details.
 
