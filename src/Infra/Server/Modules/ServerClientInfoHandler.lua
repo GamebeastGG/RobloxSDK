@@ -44,6 +44,9 @@ local ClientInfoChangedSignal = Signal.new({ copyArguments = false })
 -- Longest string a client may report for any client info value
 local MAX_CLIENT_STRING_LENGTH = 64
 
+-- How long to wait for a client to report a product's price before going without it
+local PRODUCT_PRICE_TIMEOUT = 10
+
 -- The values the backend's targeting knows for each client-reported field
 local CLIENT_INFO_VOCABULARIES = {
     inputType = { keyboard = true, gamepad = true, touch = true, unknown = true },
@@ -275,19 +278,33 @@ function ServerClientInfoHandler:GetProductInfoForPlayer(player : Player | numbe
         player = Players:GetPlayerByUserId(player)
     end
 
-    if not self:IsClientInfoResolved(player) then
+    if not player or not self:IsClientInfoResolved(player) then
         return nil
     end
 
-    local success, result = pcall(function()
-        return ClientProductPriceRemote:InvokeClient(player, productId, productType)
+    -- Bounded: InvokeClient waits as long as the client takes, so a client that never answered held
+    -- the Purchase marker until the player left, and lost it if the server shut down first
+    local thread = coroutine.running()
+    local isDone = false
+
+    task.spawn(function()
+        local success, result = pcall(function()
+            return ClientProductPriceRemote:InvokeClient(player, productId, productType)
+        end)
+        if not isDone then
+            isDone = true
+            task.spawn(thread, if success then result else nil)
+        end
     end)
 
-    if not success then
-        return nil
-    else
-        return result
-    end
+    task.delay(PRODUCT_PRICE_TIMEOUT, function()
+        if not isDone then
+            isDone = true
+            task.spawn(thread, nil)
+        end
+    end)
+
+    return coroutine.yield()
 end
 
 function ServerClientInfoHandler:UpdateClientData(player : Player | number, key : string, value : any)
