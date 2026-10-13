@@ -271,13 +271,37 @@ function ClientConfigs:Init()
         local oldConfig = DeepCopy(config)
 
         for _, change in changes do
+            local path = change.path
+
+            -- An empty path is the whole config: the server sends one when an entire config becomes
+            -- private (no value) or public again (its full value). It used to be a no-op, so a config
+            -- made private kept its last public values on clients already in game.
+            if #path == 0 then
+                config = if type(change.newValue) == "table" then change.newValue else {}
+                CachedConfigs[configKey] = config
+                continue
+            end
+
             local target = config
-            for index, pathSegment in change.path do
-                if index == #change.path then
-                    target[pathSegment] = change.newValue
-                else
-                    target = target[pathSegment]
+            for index, pathSegment in path do
+                local key = ResolveSegment(target, pathSegment)
+                if index == #path then
+                    target[key] = change.newValue
+                    break
                 end
+
+                local child = target[key]
+                if type(child) ~= "table" then
+                    -- The parent is gone, removed by an earlier change in this batch. A removal has
+                    -- nothing left to do; a value is written into a fresh table, as on the server.
+                    -- Indexing the missing parent errored and lost the rest of the batch.
+                    if change.newValue == nil then
+                        break
+                    end
+                    child = {}
+                    target[key] = child
+                end
+                target = child
             end
         end
 
