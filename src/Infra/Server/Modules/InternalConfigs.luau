@@ -58,6 +58,9 @@ local BatchConfigUpdatedSignal = Signal.new({ copyArguments = false })
 
 --= Constants =--
 
+-- The previous view of a config that had none yet
+local EMPTY_VIEW = table.freeze({})
+
 --= Variables =--
 
 --[[
@@ -588,11 +591,13 @@ function InternalConfigs:ApplyConfigs(player: Player?, configId : number, newVie
 		return
 	end
 
-	local oldConfigs = Utilities.recursiveCopy(player
+	-- Used as is rather than copied: views are frozen below when applied and only ever replaced
+	-- whole, so the old one can't change underneath. Copying it cost a deep copy per apply, for
+	-- every player with their own view on every recompose.
+	local oldConfigs = player
 		and entry.viewByPlayer[player]
 		or entry.serverView
-		or {}
-	)
+		or EMPTY_VIEW
 	local oldPrivatePaths = oldPrivacy or entry.privacy
 	local privacyConfig = entry.privacy
 
@@ -627,8 +632,7 @@ function InternalConfigs:ApplyConfigs(player: Player?, configId : number, newVie
 		local changedBatch = InternalConfigs:_checkConfigChanged(oldConfigs, newView)
 
 		if #changedBatch > 0 then
-			-- Shared by every listener rather than copied for each, so nothing may change it
-			recursiveFreeze(oldConfigs)
+			-- Shared by every listener rather than copied for each; it is a frozen view
 			BatchConfigUpdatedSignal:Fire(player, configId, changedBatch, oldConfigs)
 		end
 
