@@ -1,3 +1,8 @@
+// Builds the published SDK payload into an output dir, for the deploy workflow to upload to GCS:
+//   versions/<version>/source.json  immutable history copy
+//   latest/source.json              { worked, version, source } served by GET /sdk/v1/latest/source
+//   latest/version.json             { version } served by GET /sdk/v1/latest/version
+// Usage: node createSdkSource.js <outDir>
 const fs = require('fs');
 const path = require('path');
 
@@ -24,35 +29,38 @@ function parseDirectory(dirPath) {
 
 function getVersion(fileText) {
   const versionMatch = fileText.match(/version\s*=\s*['"]([^'"]+)['"]/);
-  return versionMatch ? versionMatch[1] : 'unknown';
+  return versionMatch ? versionMatch[1] : null;
 }
 
-(async () => {
-  const rootDir = process.cwd() + "/src";
-  const parsed = parseDirectory(rootDir);
-  const version = getVersion(parsed.Infra["MetaData.lua"]);
-  const output = JSON.stringify({ worked: true, version: version, source: parsed });
-  console.log('Payload size (bytes):', Buffer.byteLength(output));
+function writeFile(filePath, contents) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, contents);
+}
 
-  try {
-    const response = await fetch("http://127.0.0.1:3000/update-sdk-deployment", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: output,
-    });
+const outDir = process.argv[2];
+if (!outDir) {
+  console.error('Usage: node createSdkSource.js <outDir>');
+  process.exit(1);
+}
 
-    // fetch only throws when no response arrives; a rejected deployment still has to fail the job
-    if (!response.ok) {
-      console.error(`Deployment failed: ${response.status} ${response.statusText}`, await response.text());
-      process.exit(1);
-    }
+const rootDir = path.join(process.cwd(), 'src');
+const parsed = parseDirectory(rootDir);
+const metaData = parsed.Infra && (parsed.Infra['MetaData.luau'] || parsed.Infra['MetaData.lua']);
+const version = metaData && getVersion(metaData);
+if (!version) {
+  console.error('Could not read the SDK version from src/Infra/MetaData');
+  process.exit(1);
+}
 
-    console.log(`Deployed SDK ${version}`);
-    process.exit(0);
-  } catch (err) {
-    console.error("Deployment failed:", err);
-    process.exit(1);
-  }
-})();
+const source = JSON.stringify({ worked: true, version: version, source: parsed });
+console.log('Payload size (bytes):', Buffer.byteLength(source));
+
+writeFile(path.join(outDir, 'versions', version, 'source.json'), source);
+writeFile(path.join(outDir, 'latest', 'source.json'), source);
+writeFile(path.join(outDir, 'latest', 'version.json'), JSON.stringify({ version: version }));
+
+// Exposed to later workflow steps
+if (process.env.GITHUB_OUTPUT) {
+  fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+}
+console.log(`Built SDK ${version} into ${outDir}`);

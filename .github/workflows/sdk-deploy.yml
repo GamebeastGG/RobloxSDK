@@ -1,0 +1,72 @@
+name: Deploy SDK
+
+# Publishes src/ to the environment's GCS bucket. core-backend serves it from there:
+#   GET /sdk/v1/latest/source  <- roblox-sdk/latest/source.json  (Studio plugin installs from this)
+#   GET /sdk/v1/latest/version <- roblox-sdk/latest/version.json (game servers warn when outdated)
+# Every release is also kept at roblox-sdk/versions/<version>/source.json.
+# The backend caches both objects for up to a minute.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        type: choice
+        description: 'Deployment target'
+        required: true
+        default: 'stage'
+        options:
+          - stage
+          - prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      BUCKET: gs://${{ github.event.inputs.target }}-bucket-x-cycling-414419
+      PREFIX: roblox-sdk
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Build SDK payload
+        id: build
+        run: node .github/workflows/createSdkSource.js "$RUNNER_TEMP/sdk"
+
+      - name: "Authenticate to Google Cloud"
+        uses: "google-github-actions/auth@v2"
+        with:
+          project_id: "x-cycling-414419"
+          workload_identity_provider: "projects/577495761779/locations/global/workloadIdentityPools/github-actions/providers/github-actions-provider"
+          service_account: "service-account-github-act-764@x-cycling-414419.iam.gserviceaccount.com"
+
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      # Order matters: the history copy and the source land before version.json, so a reader can
+      # never see a new version whose source isn't there yet.
+      - name: Upload to GCS
+        env:
+          VERSION: ${{ steps.build.outputs.version }}
+          OUT: ${{ runner.temp }}/sdk
+        run: |
+          set -euo pipefail
+          cp_json() {
+            gcloud storage cp "$1" "$2" \
+              --cache-control=no-store \
+              --content-type=application/json
+          }
+          cp_json "$OUT/versions/$VERSION/source.json" "$BUCKET/$PREFIX/versions/$VERSION/source.json"
+          cp_json "$OUT/latest/source.json"            "$BUCKET/$PREFIX/latest/source.json"
+          cp_json "$OUT/latest/version.json"           "$BUCKET/$PREFIX/latest/version.json"
+          echo "Deployed SDK $VERSION to $BUCKET/$PREFIX"
