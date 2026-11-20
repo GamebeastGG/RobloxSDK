@@ -102,6 +102,23 @@ export type CohortsService = {
 	GetCohortMembershipStatusAsync : (self : CohortsService, cohortName : string, userIds : { number }) -> { [ number ] : boolean }
 }
 
-export type Service = ConfigsService | MarkersService | ExperimentsService | CohortsService
+-- Sent by Overwolf launchers on the deep link. Fields from newer launchers pass through, so check for
+-- them rather than assuming this is everything.
+export type OverwolfLaunchData = {
+	source : "overwolf",
+	-- The place the launcher opened, as a string
+	placeId : string?,
+	-- The player's day in the launcher's daily play streak for this game, while a streak campaign runs
+	streak : number?,
+	[string] : any,
+}
+
+export type OverwolfService = {
+	OnLaunchData : (self : OverwolfService, callback : (player : Player, launchData : OverwolfLaunchData) -> ()) -> RBXScriptConnection,
+	GetLaunchDataAsync : (self : OverwolfService, player : Player) -> OverwolfLaunchData?,
+	SimulateLaunchData : (self : OverwolfService, player : Player, launchData : { [string] : any }?) -> (),
+}
+
+export type Service = ConfigsService | MarkersService | ExperimentsService | CohortsService | OverwolfService
 
 return true

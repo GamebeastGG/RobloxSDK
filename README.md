@@ -52,6 +52,25 @@ Relevant `sdkSettings`:
 
 In Studio, any rate you leave out of `sdkSettings` defaults faster, so dashboard edits show up quickly while you test: `markerFlushRate` 2s, `statusPollRate` 5s, `assignmentRefreshRate` 10s and `serverReportRate` 10s. Rates you set yourself are used as given, in Studio and in live servers.
 
+## Overwolf launch data
+Overwolf launchers open your experience with launch data on the deep link: `source = "overwolf"`, the `placeId` they launched, and, while a daily streak campaign is running, the player's `streak` day. Bind a callback on the server to run your reward logic for each player who arrives this way, including players already in the server:
+
+```lua
+local Overwolf = Gamebeast:GetService("Overwolf")
+
+Overwolf:OnLaunchData(function(player, launchData)
+	if launchData.streak then
+		GrantStreakReward(player, launchData.streak)
+	end
+end)
+```
+
+The callback only fires for Overwolf launches, once per player per server. Use `Overwolf:GetLaunchDataAsync(player)` to read it on demand instead. It yields until the launch data is read (a few seconds at most after joining) and returns nil if the player didn't come from an Overwolf launcher. Fields added by newer launchers are passed through as they are.
+
+The launcher sends the same `streak` on every launch that day, and anyone can put launch data on a Roblox link, so keep track of which streak days a player has already been rewarded for (in their saved data, say) and don't hand out anything you wouldn't give for a typed-in code.
+
+Studio never has launch data. To test your reward logic, simulate a launch: `Overwolf:SimulateLaunchData(player, { streak = 3 })` fires your callbacks as if the player had come from the launcher.
+
 ## Changing settings at runtime
 The `sdkSettings` passed to `Setup` can be changed on a running SDK with `UpdateSettings`. Settings left out of the table keep their current value, and nothing is applied unless every setting given is valid:
 

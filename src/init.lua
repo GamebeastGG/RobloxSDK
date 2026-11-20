@@ -34,6 +34,8 @@ export type ExperimentsService = Types.ExperimentsService
 export type ExperimentAssignment = Types.ExperimentAssignment
 export type ExperimentPropertyValue = Types.ExperimentPropertyValue
 export type CohortsService = Types.CohortsService
+export type OverwolfService = Types.OverwolfService
+export type OverwolfLaunchData = Types.OverwolfLaunchData
 
 type ModuleData = {
 	Name : string,
